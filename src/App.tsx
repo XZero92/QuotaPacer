@@ -3,7 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { CliInfo, UsageViewState } from "./types";
+import { calculatePace, paceLabel } from "./pace";
+import type { CliInfo, UsageViewState, UsageWindow } from "./types";
 import {
   featuredWindow,
   formatResetTime,
@@ -14,6 +15,12 @@ import {
   usageTone,
 } from "./usage";
 import "./App.css";
+
+type OverlaySize = "small" | "middle" | "large";
+
+function isOverlaySize(value: unknown): value is OverlaySize {
+  return value === "small" || value === "middle" || value === "large";
+}
 
 function errorTitle(connection: UsageViewState["connection"]) {
   switch (connection) {
@@ -32,20 +39,216 @@ function errorTitle(connection: UsageViewState["connection"]) {
   }
 }
 
+function windowLabel(window: UsageWindow) {
+  const duration = formatWindowDuration(window.windowDurationMins);
+  return window.bucketLabel ? `${duration} · ${window.bucketLabel}` : duration;
+}
+
+function WindowHeadingLabel({ window }: { window: UsageWindow }) {
+  return (
+    <strong className="window-label">
+      <span className="brand-label">Codex</span>
+      <span className="label-separator" aria-hidden="true">
+        ·
+      </span>
+      <span>{windowLabel(window)}</span>
+    </strong>
+  );
+}
+
+function EmptySurface({
+  usage,
+  compact = false,
+}: {
+  usage: UsageViewState;
+  compact?: boolean;
+}) {
+  const title =
+    usage.connection === "starting"
+      ? "사용량 확인 중"
+      : usage.connection === "no_limits"
+        ? "사용량 한도 없음"
+        : errorTitle(usage.connection);
+
+  if (compact) {
+    return (
+      <div className="small-card is-empty" aria-label={title}>
+        <div className="small-ring" aria-hidden="true">
+          <strong>—</strong>
+        </div>
+        <div className="small-copy">
+          <strong>Codex</strong>
+          <small>
+            {usage.connection === "starting" ? "확인 중" : "상태 확인"}
+          </small>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="empty-surface">
+      <strong>
+        <span className="brand-label">Codex</span>
+        <span aria-hidden="true"> · </span>
+        <span>{title}</span>
+      </strong>
+      <small>{usage.errorMessage ?? "Codex 계정 상태를 확인합니다"}</small>
+    </div>
+  );
+}
+
+function SmallOverlay({
+  usage,
+  featured,
+}: {
+  usage: UsageViewState;
+  featured: UsageWindow | null;
+}) {
+  if (!featured) return <EmptySurface usage={usage} compact />;
+
+  return (
+    <div
+      className={`small-card tone-${usageTone(featured.remainingPercent)} ${
+        usage.connection === "stale" ? "is-stale" : ""
+      }`}
+      aria-label={`Codex · ${windowLabel(featured)} 제한 ${featured.remainingPercent}% 남음`}
+    >
+      <div
+        className="small-ring"
+        style={
+          {
+            "--remaining": featured.remainingPercent,
+          } as React.CSSProperties
+        }
+        aria-label={`${featured.remainingPercent}% 남음 원형 게이지`}
+      >
+        <strong>{featured.remainingPercent}%</strong>
+      </div>
+      <div className="small-copy">
+        <strong>Codex</strong>
+        <small>
+          {formatWindowDuration(featured.windowDurationMins)}
+          {usage.connection === "stale" ? " · 지연" : ""}
+        </small>
+      </div>
+      {usage.connection === "stale" && (
+        <i className="stale-dot" aria-hidden="true" />
+      )}
+    </div>
+  );
+}
+
+function MiddleOverlay({
+  usage,
+  featured,
+}: {
+  usage: UsageViewState;
+  featured: UsageWindow | null;
+}) {
+  if (!featured) return <EmptySurface usage={usage} />;
+
+  return (
+    <div className="middle-card">
+      <div className="middle-heading">
+        <WindowHeadingLabel window={featured} />
+        <span className={`tone-text-${usageTone(featured.remainingPercent)}`}>
+          {featured.remainingPercent}% 남음
+        </span>
+      </div>
+      <div
+        className="usage-meter"
+        aria-label={`${featured.remainingPercent}% 남음`}
+      >
+        <span
+          className={`tone-${usageTone(featured.remainingPercent)}`}
+          style={{ width: `${featured.remainingPercent}%` }}
+        />
+      </div>
+      <small>
+        {usage.connection === "stale"
+          ? staleLabel(usage.lastSuccessfulAt)
+          : `${formatResetTime(featured.resetsAt)} 리셋`}
+      </small>
+    </div>
+  );
+}
+
+function PaceRow({
+  usage,
+  window,
+}: {
+  usage: UsageViewState;
+  window: UsageWindow;
+}) {
+  const pace = calculatePace(window, usage);
+  const elapsedLabel =
+    pace.elapsedPercent === null ? "—" : `${Math.round(pace.elapsedPercent)}%`;
+
+  return (
+    <article className="pace-row">
+      <div className="pace-heading">
+        <WindowHeadingLabel window={window} />
+        <span className={`tone-text-${usageTone(window.remainingPercent)}`}>
+          {window.remainingPercent}% 남음
+        </span>
+      </div>
+      <div className="pace-bar-row">
+        <span>소진</span>
+        <div className="pace-meter" aria-label={`${pace.usedPercent}% 소진`}>
+          <i
+            className={`tone-${usageTone(window.remainingPercent)}`}
+            style={{ width: `${pace.usedPercent}%` }}
+          />
+        </div>
+        <strong>{Math.round(pace.usedPercent)}%</strong>
+      </div>
+      <div className="pace-bar-row">
+        <span>기간</span>
+        <div className="pace-meter" aria-label={`${elapsedLabel} 경과`}>
+          {pace.elapsedPercent !== null && (
+            <i
+              className="elapsed"
+              style={{ width: `${pace.elapsedPercent}%` }}
+            />
+          )}
+        </div>
+        <strong>{elapsedLabel}</strong>
+      </div>
+      <div className="pace-footer">
+        <span>{paceLabel(pace)}</span>
+        <small>{formatResetTime(window.resetsAt)} 리셋</small>
+      </div>
+    </article>
+  );
+}
+
+function LargeOverlay({ usage }: { usage: UsageViewState }) {
+  const windows = useMemo(() => sortedWindows(usage.windows), [usage.windows]);
+  if (windows.length === 0) return <EmptySurface usage={usage} />;
+
+  return (
+    <div
+      className={`pace-list ${usage.connection === "stale" ? "is-stale" : ""}`}
+      role="region"
+      aria-label="Codex 균등 페이스"
+    >
+      {windows.map((window) => (
+        <PaceRow key={window.id} usage={usage} window={window} />
+      ))}
+    </div>
+  );
+}
+
 function App() {
   const [usage, setUsage] = useState<UsageViewState>(INITIAL_USAGE_STATE);
-  const [expanded, setExpanded] = useState(false);
-  const [cliInfo, setCliInfo] = useState<CliInfo | null>(null);
+  const [sizeMode, setSizeMode] = useState<OverlaySize>("middle");
+  const [sizeReady, setSizeReady] = useState(false);
   const draggingRef = useRef(false);
 
-  const collapse = useCallback(() => setExpanded(false), []);
-  const collapseUnlessDragging = useCallback(() => {
-    if (!draggingRef.current) collapse();
-  }, [collapse]);
   const startDragging = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      const target = event.target as HTMLElement;
-      if (event.button !== 0 || target.closest(".expand-button")) return;
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
       draggingRef.current = true;
@@ -70,191 +273,66 @@ function App() {
       ],
     });
     if (typeof path !== "string") return;
-    const info = await invoke<CliInfo>("set_codex_executable", { path });
-    setCliInfo(info);
+    await invoke<CliInfo>("set_codex_executable", { path });
   }, []);
+  const showContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLElement>) => {
+      event.preventDefault();
+      if (draggingRef.current) return;
+      void invoke("show_overlay_context_menu");
+    },
+    [],
+  );
 
   useEffect(() => {
     void invoke<UsageViewState>("get_usage_state").then(setUsage);
+    void invoke<OverlaySize>("get_overlay_size")
+      .then((size) => {
+        if (isOverlaySize(size)) setSizeMode(size);
+      })
+      .finally(() => setSizeReady(true));
     const unlistenUsage = listen<UsageViewState>(
       "usage://state-changed",
       (event) => setUsage(event.payload),
     );
-    const unlistenCollapse = listen("ui://collapse", collapseUnlessDragging);
+    const unlistenOverlaySize = listen<OverlaySize>(
+      "ui://overlay-size-changed",
+      (event) => {
+        if (isOverlaySize(event.payload)) setSizeMode(event.payload);
+      },
+    );
     const unlistenPickCli = listen("usage://pick-cli", () => void chooseCli());
     return () => {
       void unlistenUsage.then((unlisten) => unlisten());
-      void unlistenCollapse.then((unlisten) => unlisten());
+      void unlistenOverlaySize.then((unlisten) => unlisten());
       void unlistenPickCli.then((unlisten) => unlisten());
     };
-  }, [chooseCli, collapseUnlessDragging]);
+  }, [chooseCli]);
 
   useEffect(() => {
-    const height = expanded
-      ? Math.min(420, Math.max(200, 176 + usage.windows.length * 54))
-      : 48;
-    void invoke("set_overlay_expanded", { expanded, height });
-  }, [expanded, usage.windows.length]);
+    if (!sizeReady) return;
+    void invoke("set_overlay_layout", {
+      size: sizeMode,
+      windowCount: usage.windows.length,
+    });
+  }, [sizeMode, sizeReady, usage.windows.length]);
 
-  const windows = useMemo(() => sortedWindows(usage.windows), [usage.windows]);
   const featured = featuredWindow(usage);
-  const canPickCli = ["cli_missing", "cli_unsupported"].includes(
-    usage.connection,
-  );
 
   return (
-    <main className={`overlay ${expanded ? "is-expanded" : ""}`}>
-      <div
-        className="capsule"
-        data-tauri-drag-region
-        onPointerDown={startDragging}
-      >
-        <span
-          className="drag-handle"
-          data-tauri-drag-region
-          aria-hidden="true"
-        />
-        {featured ? (
-          <>
-            <span
-              className={`usage-ring tone-${usageTone(featured.remainingPercent)}`}
-              style={
-                {
-                  "--remaining": featured.remainingPercent,
-                } as React.CSSProperties
-              }
-              aria-hidden="true"
-            >
-              <span>{featured.remainingPercent}</span>
-            </span>
-            <span className="capsule-copy">
-              <strong className="capsule-title">
-                <span className="codex-label">CODEX</span>
-                <span className="capsule-title-separator" aria-hidden="true">
-                  ·
-                </span>
-                <span className="capsule-title-text">
-                  {formatWindowDuration(featured.windowDurationMins)}
-                </span>
-              </strong>
-              <small>
-                {usage.connection === "stale"
-                  ? staleLabel(usage.lastSuccessfulAt)
-                  : `${featured.remainingPercent}% 남음`}
-              </small>
-            </span>
-          </>
-        ) : (
-          <span className="capsule-copy empty-copy">
-            <strong className="capsule-title">
-              <span className="codex-label">CODEX</span>
-              <span className="capsule-title-separator" aria-hidden="true">
-                ·
-              </span>
-              <span className="capsule-title-text">
-                {usage.connection === "starting"
-                  ? "사용량 확인 중"
-                  : usage.connection === "no_limits"
-                    ? "사용량 한도 없음"
-                    : errorTitle(usage.connection)}
-              </span>
-            </strong>
-            <small>
-              {usage.errorMessage ?? "Codex 계정 상태를 확인합니다"}
-            </small>
-          </span>
-        )}
-        <button
-          className="expand-button"
-          type="button"
-          aria-expanded={expanded}
-          aria-label={expanded ? "사용량 상세 접기" : "사용량 상세 펼치기"}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={() => setExpanded((value) => !value)}
-        >
-          {expanded ? "−" : "+"}
-        </button>
-      </div>
-
-      {expanded && (
-        <section className="details" aria-label="Codex 사용량 상세">
-          <header>
-            <div>
-              <p className="eyebrow">CODEX USAGE</p>
-              <h1>
-                {windows.length > 0
-                  ? "남은 사용량"
-                  : errorTitle(usage.connection)}
-              </h1>
-            </div>
-            <button
-              className="icon-button"
-              type="button"
-              onClick={collapse}
-              aria-label="접기"
-            >
-              ×
-            </button>
-          </header>
-
-          {windows.length > 0 ? (
-            <div
-              className={`window-list ${usage.connection === "stale" ? "is-stale" : ""}`}
-            >
-              {windows.map((window) => (
-                <article className="window-row" key={window.id}>
-                  <div className="window-heading">
-                    <span>
-                      {formatWindowDuration(window.windowDurationMins)}
-                      {window.bucketLabel ? ` · ${window.bucketLabel}` : ""}
-                    </span>
-                    <strong
-                      className={`tone-text-${usageTone(window.remainingPercent)}`}
-                    >
-                      {window.remainingPercent}%
-                    </strong>
-                  </div>
-                  <div
-                    className="meter"
-                    aria-label={`${window.remainingPercent}% 남음`}
-                  >
-                    <span
-                      className={`tone-${usageTone(window.remainingPercent)}`}
-                      style={{ width: `${window.remainingPercent}%` }}
-                    />
-                  </div>
-                  <small>{formatResetTime(window.resetsAt)} 리셋</small>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <div className="empty-state">
-              <p>
-                {usage.errorMessage ?? "현재 계정에 표시할 제한 창이 없습니다."}
-              </p>
-              {canPickCli && (
-                <button type="button" onClick={() => void chooseCli()}>
-                  CLI 경로 선택
-                </button>
-              )}
-            </div>
-          )}
-
-          <footer>
-            <span>
-              {usage.connection === "stale"
-                ? staleLabel(usage.lastSuccessfulAt)
-                : usage.errorMessage
-                  ? usage.errorMessage
-                  : cliInfo && !cliInfo.meetsRecommendedVersion
-                    ? "CLI 0.144.6 이상 권장"
-                    : "60초마다 자동 갱신"}
-            </span>
-            <button type="button" onClick={() => void invoke("refresh_usage")}>
-              새로고침
-            </button>
-          </footer>
-        </section>
+    <main
+      className={`overlay size-${sizeMode} ${sizeReady ? "is-size-ready" : ""}`}
+      data-tauri-drag-region
+      onPointerDown={startDragging}
+      onContextMenu={showContextMenu}
+      title="드래그하여 이동 · 우클릭하여 메뉴 열기"
+    >
+      {sizeMode === "small" ? (
+        <SmallOverlay usage={usage} featured={featured} />
+      ) : sizeMode === "middle" ? (
+        <MiddleOverlay usage={usage} featured={featured} />
+      ) : (
+        <LargeOverlay usage={usage} />
       )}
     </main>
   );
