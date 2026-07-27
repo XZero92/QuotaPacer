@@ -1,9 +1,11 @@
 mod codex;
+mod pace;
 mod settings;
 mod usage;
 
 use codex::{inspect_cli, CliInfo, UsageService};
-use settings::{OverlaySize, SettingsStore, StoredPosition};
+use pace::{PaceService, PaceViewState};
+use settings::{OverlaySize, PaceSettings, SettingsStore, StoredPosition};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::menu::{
@@ -19,6 +21,7 @@ use usage::UsageViewState;
 
 struct AppState {
     usage: UsageService,
+    pace: PaceService,
     settings: SettingsStore,
     exiting: AtomicBool,
 }
@@ -55,6 +58,36 @@ impl OverlayMenus {
 #[tauri::command]
 fn get_usage_state(state: State<'_, AppState>) -> UsageViewState {
     state.usage.state()
+}
+
+#[tauri::command]
+fn get_pace_state(state: State<'_, AppState>) -> PaceViewState {
+    state.pace.state()
+}
+
+#[tauri::command]
+fn get_pace_settings(state: State<'_, AppState>) -> PaceSettings {
+    state.settings.pace_settings()
+}
+
+#[tauri::command]
+fn set_pace_settings(
+    pace_settings: PaceSettings,
+    state: State<'_, AppState>,
+) -> Result<PaceSettings, String> {
+    state.settings.set_pace_settings(pace_settings.clone())?;
+    state.pace.recompute(&state.usage.state());
+    Ok(pace_settings)
+}
+
+#[tauri::command]
+fn clear_pace_history(state: State<'_, AppState>) -> Result<(), String> {
+    state.pace.clear_history(&state.usage.state())
+}
+
+#[tauri::command]
+fn show_pace_settings(app: tauri::AppHandle) {
+    show_settings_window(&app);
 }
 
 #[tauri::command]
@@ -109,13 +142,21 @@ pub fn run() {
             },
         ))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .on_menu_event(|app, event| handle_menu_event(app, event.id().as_ref()))
         .setup(|app| {
-            let config_path = app.path().app_config_dir()?.join("settings.json");
+            let config_dir = app.path().app_config_dir()?;
+            let config_path = config_dir.join("settings.json");
             let settings = SettingsStore::load(config_path);
-            let usage = UsageService::start(app.handle().clone(), settings.clone());
+            let pace = PaceService::new(
+                app.handle().clone(),
+                settings.clone(),
+                config_dir.join("pace-history.json"),
+            );
+            let usage = UsageService::start(app.handle().clone(), settings.clone(), pace.clone());
             app.manage(AppState {
                 usage,
+                pace,
                 settings: settings.clone(),
                 exiting: AtomicBool::new(false),
             });
@@ -129,10 +170,18 @@ pub fn run() {
                 install_window_handlers(&window);
                 window.show()?;
             }
+            if let Some(window) = app.get_webview_window("settings") {
+                install_settings_window_handlers(&window);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_usage_state,
+            get_pace_state,
+            get_pace_settings,
+            set_pace_settings,
+            clear_pace_history,
+            show_pace_settings,
             refresh_usage,
             set_codex_executable,
             get_overlay_size,
@@ -177,12 +226,15 @@ fn setup_menus(app: &mut tauri::App, selected: OverlaySize) -> tauri::Result<Ove
     let tray_refresh = MenuItemBuilder::with_id("tray-refresh", "새로고침").build(app)?;
     let tray_choose_cli =
         MenuItemBuilder::with_id("tray-choose-cli", "Codex CLI 경로 선택").build(app)?;
+    let tray_pace_settings =
+        MenuItemBuilder::with_id("tray-pace-settings", "페이스 설정").build(app)?;
     let tray_quit = MenuItemBuilder::with_id("tray-quit", "종료").build(app)?;
     let tray_menu = MenuBuilder::new(app)
         .items(&[
             &tray_toggle,
             &tray_refresh,
             &tray_size_menu,
+            &tray_pace_settings,
             &tray_choose_cli,
             &tray_quit,
         ])
@@ -192,6 +244,8 @@ fn setup_menus(app: &mut tauri::App, selected: OverlaySize) -> tauri::Result<Ove
     let context_refresh = MenuItemBuilder::with_id("context-refresh", "새로고침").build(app)?;
     let context_choose_cli =
         MenuItemBuilder::with_id("context-choose-cli", "Codex CLI 경로 선택").build(app)?;
+    let context_pace_settings =
+        MenuItemBuilder::with_id("context-pace-settings", "페이스 설정").build(app)?;
     let context_hide = MenuItemBuilder::with_id("context-hide", "숨기기").build(app)?;
     let context_quit = MenuItemBuilder::with_id("context-quit", "종료").build(app)?;
     let context = MenuBuilder::new(app)
@@ -199,6 +253,7 @@ fn setup_menus(app: &mut tauri::App, selected: OverlaySize) -> tauri::Result<Ove
         .separator()
         .items(&[
             &context_refresh,
+            &context_pace_settings,
             &context_choose_cli,
             &context_hide,
             &context_quit,
@@ -237,6 +292,7 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
             show_main_window(app);
             let _ = app.emit("usage://pick-cli", ());
         }
+        id if is_pace_settings_menu_id(id) => show_settings_window(app),
         "context-hide" => {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.hide();
@@ -245,6 +301,10 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
         "tray-quit" | "context-quit" => quit_app(app),
         _ => {}
     }
+}
+
+fn is_pace_settings_menu_id(id: &str) -> bool {
+    matches!(id, "tray-pace-settings" | "context-pace-settings")
 }
 
 fn overlay_size_from_menu_id(id: &str) -> Option<OverlaySize> {
@@ -287,7 +347,7 @@ fn overlay_dimensions(size: OverlaySize, window_count: usize) -> (f64, f64) {
     }
 
     let extra_rows = window_count.saturating_sub(1) as f64;
-    (320.0, (152.0 + extra_rows * 96.0).min(420.0))
+    (360.0, (196.0 + extra_rows * 132.0).min(520.0))
 }
 
 fn resize_overlay_window(
@@ -396,6 +456,16 @@ fn install_window_handlers(window: &WebviewWindow) {
     });
 }
 
+fn install_settings_window_handlers(window: &WebviewWindow) {
+    let window_for_event = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = window_for_event.hide();
+        }
+    });
+}
+
 fn position_window(window: &WebviewWindow, settings: &SettingsStore) {
     let Ok(monitors) = window.available_monitors() else {
         return;
@@ -453,9 +523,19 @@ fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
+fn show_settings_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("settings") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{anchored_position, overlay_dimensions, overlay_size_from_menu_id};
+    use super::{
+        anchored_position, is_pace_settings_menu_id, overlay_dimensions, overlay_size_from_menu_id,
+    };
     use crate::settings::OverlaySize;
     use tauri::{PhysicalPosition, PhysicalSize};
 
@@ -463,13 +543,13 @@ mod tests {
     fn collapsed_dimensions_follow_the_selected_information_density() {
         assert_eq!(overlay_dimensions(OverlaySize::Small, 1), (152.0, 56.0));
         assert_eq!(overlay_dimensions(OverlaySize::Middle, 1), (280.0, 72.0));
-        assert_eq!(overlay_dimensions(OverlaySize::Large, 1), (320.0, 152.0));
+        assert_eq!(overlay_dimensions(OverlaySize::Large, 1), (360.0, 196.0));
     }
 
     #[test]
     fn large_layout_grows_per_window_and_bounds_its_height() {
-        assert_eq!(overlay_dimensions(OverlaySize::Large, 2), (320.0, 248.0));
-        assert_eq!(overlay_dimensions(OverlaySize::Large, 100), (320.0, 420.0));
+        assert_eq!(overlay_dimensions(OverlaySize::Large, 2), (360.0, 328.0));
+        assert_eq!(overlay_dimensions(OverlaySize::Large, 100), (360.0, 520.0));
     }
 
     #[test]
@@ -487,6 +567,13 @@ mod tests {
             Some(OverlaySize::Large)
         );
         assert_eq!(overlay_size_from_menu_id("context-refresh"), None);
+    }
+
+    #[test]
+    fn tray_and_context_menus_open_the_same_pace_settings_window() {
+        assert!(is_pace_settings_menu_id("tray-pace-settings"));
+        assert!(is_pace_settings_menu_id("context-pace-settings"));
+        assert!(!is_pace_settings_menu_id("tray-refresh"));
     }
 
     #[test]

@@ -34,3 +34,35 @@ export interface CliInfo {
   meetsRecommendedVersion: boolean;
   appServerSupported: boolean;
 }
+
+export type ForecastBasis = "recent" | "periodAverage" | "unavailable";
+export type PaceStatus =
+  | "safe"
+  | "planExceeded"
+  | "exhaustionRisk"
+  | "unavailable";
+
+export interface PaceWindowView {
+  windowId: string;
+  forecastBasis: ForecastBasis;
+  observedHours: number | null;
+  projectedExhaustionAt: number | null;
+  projectedEndPercent: number | null;
+  plannedUsedPercent: number | null;
+  planDeltaPercentPoints: number | null;
+  status: PaceStatus;
+  earlyEstimate: boolean;
+}
+
+export interface PaceViewState {
+  windows: PaceWindowView[];
+  updatedAt: number | null;
+}
+
+export type PacePlanMode = "even" | "weekday";
+
+export interface PaceSettings {
+  planMode: PacePlanMode;
+  weekdayAllocations: number[];
+  osNotificationsEnabled: boolean;
+}

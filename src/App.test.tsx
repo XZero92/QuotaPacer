@@ -6,7 +6,7 @@ import {
   within,
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { UsageViewState } from "./types";
+import type { PaceViewState, UsageViewState } from "./types";
 import App from "./App";
 
 const mocks = vi.hoisted(() => ({
@@ -49,12 +49,31 @@ const weeklyOnly: UsageViewState = {
   errorMessage: null,
 };
 
+const weeklyPace: PaceViewState = {
+  windows: [
+    {
+      windowId: "codex:primary",
+      forecastBasis: "periodAverage",
+      observedHours: 97.4,
+      projectedExhaustionAt: null,
+      projectedEndPercent: 52,
+      plannedUsedPercent: 42.9,
+      planDeltaPercentPoints: -16.9,
+      status: "safe",
+      earlyEstimate: false,
+    },
+  ],
+  updatedAt: 649_216,
+};
+
 function mockStartup(
   size: "small" | "middle" | "large" = "middle",
   usage = weeklyOnly,
+  pace = weeklyPace,
 ) {
   mocks.invoke.mockImplementation((command: string) => {
     if (command === "get_usage_state") return Promise.resolve(usage);
+    if (command === "get_pace_state") return Promise.resolve(pace);
     if (command === "get_overlay_size") return Promise.resolve(size);
     return Promise.resolve();
   });
@@ -117,7 +136,7 @@ describe("Codex 사용량 오버레이", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("large는 모든 실제 제한 창의 균등 페이스를 표시한다", async () => {
+  it("large는 상태 판정, 예측, 권장선을 모든 실제 제한 창에 표시한다", async () => {
     const multiWindow: UsageViewState = {
       ...weeklyOnly,
       windows: [
@@ -133,15 +152,39 @@ describe("Codex 사용량 오버레이", () => {
         },
       ],
     };
-    mockStartup("large", multiWindow);
+    mockStartup("large", multiWindow, {
+      windows: [
+        weeklyPace.windows[0],
+        {
+          windowId: "codex:secondary",
+          forecastBasis: "recent",
+          observedHours: 8.25,
+          projectedExhaustionAt: 657_000,
+          projectedEndPercent: 125,
+          plannedUsedPercent: 42,
+          planDeltaPercentPoints: 18,
+          status: "exhaustionRisk",
+          earlyEstimate: false,
+        },
+      ],
+      updatedAt: 649_216,
+    });
     render(<App />);
 
     expect(
-      await screen.findByRole("region", { name: "Codex 균등 페이스" }),
+      await screen.findByRole("region", { name: "Codex 페이스 예측" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("Codex")).toHaveLength(2);
-    expect(screen.getByText("16%p 여유")).toBeInTheDocument();
-    expect(screen.getByText("균등 페이스보다 18%p 빠름")).toBeInTheDocument();
+    expect(screen.getByText("Codex Pace")).toBeInTheDocument();
+    expect(screen.queryByText(/^Codex$/)).not.toBeInTheDocument();
+    expect(screen.getByText("17%p 여유")).toBeInTheDocument();
+    expect(screen.getByText("계획보다 18%p 초과")).toBeInTheDocument();
+    expect(screen.getByText("초기화까지 충분")).toBeInTheDocument();
+    expect(screen.getByText("초기화 전 소진 예상")).toBeInTheDocument();
+    expect(screen.getByText("기간 평균")).toBeInTheDocument();
+    expect(screen.getByText("최근 8.3시간")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("26% 사용, 현재 권장 43%"),
+    ).toBeInTheDocument();
     expect(screen.getByText("주간")).toBeInTheDocument();
     expect(screen.getByText("5시간")).toBeInTheDocument();
     await waitFor(() =>
@@ -150,6 +193,28 @@ describe("Codex 사용량 오버레이", () => {
         windowCount: 2,
       }),
     );
+  });
+
+  it("large는 페이스 갱신 이벤트의 계획 초과 상태를 반영한다", async () => {
+    mockStartup("large");
+    render(<App />);
+    expect(await screen.findByText("초기화까지 충분")).toBeInTheDocument();
+
+    mocks.listeners.get("pace://state-changed")?.({
+      payload: {
+        ...weeklyPace,
+        windows: [
+          {
+            ...weeklyPace.windows[0],
+            status: "planExceeded",
+            planDeltaPercentPoints: 4,
+          },
+        ],
+      },
+    });
+
+    expect(await screen.findByText("계획보다 4%p 초과")).toBeInTheDocument();
+    expect(screen.getByText("초기화까지 충분")).toBeInTheDocument();
   });
 
   it("우클릭하면 네이티브 오버레이 메뉴를 요청한다", async () => {

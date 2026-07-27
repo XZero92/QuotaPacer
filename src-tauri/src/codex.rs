@@ -1,3 +1,4 @@
+use crate::pace::PaceService;
 use crate::settings::SettingsStore;
 use crate::usage::{normalize_rate_limits, ConnectionState, UsageViewState};
 use serde::Serialize;
@@ -51,13 +52,13 @@ enum ServiceCommand {
 }
 
 impl UsageService {
-    pub fn start(app: AppHandle, settings: SettingsStore) -> Self {
+    pub fn start(app: AppHandle, settings: SettingsStore, pace: PaceService) -> Self {
         let state = Arc::new(Mutex::new(UsageViewState::initial()));
         let (commands, receiver) = mpsc::channel();
         let thread_state = state.clone();
         thread::Builder::new()
             .name("codex-usage-service".to_string())
-            .spawn(move || service_loop(app, settings, thread_state, receiver))
+            .spawn(move || service_loop(app, settings, pace, thread_state, receiver))
             .expect("failed to start Codex usage service");
         Self { state, commands }
     }
@@ -96,6 +97,7 @@ pub fn inspect_cli(path: Option<PathBuf>) -> Result<CliInfo, String> {
 fn service_loop(
     app: AppHandle,
     settings: SettingsStore,
+    pace: PaceService,
     shared_state: Arc<Mutex<UsageViewState>>,
     commands: Receiver<ServiceCommand>,
 ) {
@@ -137,7 +139,7 @@ fn service_loop(
             if let Some(rpc) = client.as_mut() {
                 match fetch_rate_limits(rpc) {
                     Ok(new_state) => {
-                        publish_state(&app, &shared_state, new_state);
+                        publish_state(&app, &shared_state, &pace, new_state);
                         retry_index = 0;
                         next_action = Instant::now() + POLL_INTERVAL;
                     }
@@ -152,7 +154,7 @@ fn service_loop(
                 match connect(settings.codex_executable()) {
                     Ok((rpc, new_state)) => {
                         client = Some(rpc);
-                        publish_state(&app, &shared_state, new_state);
+                        publish_state(&app, &shared_state, &pace, new_state);
                         retry_index = 0;
                         next_action = Instant::now() + POLL_INTERVAL;
                     }
@@ -301,8 +303,10 @@ fn publish_connection(
 fn publish_state(
     app: &AppHandle,
     shared_state: &Arc<Mutex<UsageViewState>>,
+    pace: &PaceService,
     new_state: UsageViewState,
 ) {
+    pace.process(&new_state);
     if let Ok(mut state) = shared_state.lock() {
         *state = new_state;
         let snapshot = state.clone();

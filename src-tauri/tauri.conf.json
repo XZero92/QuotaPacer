@@ -26,6 +26,20 @@
         "resizable": false,
         "shadow": false,
         "visible": false
+      },
+      {
+        "label": "settings",
+        "title": "QuotaPacer 페이스 설정",
+        "width": 480,
+        "height": 620,
+        "minWidth": 480,
+        "minHeight": 620,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "skipTaskbar": false,
+        "resizable": false,
+        "visible": false
       }
     ],
     "security": {

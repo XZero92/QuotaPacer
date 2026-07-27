@@ -1,0 +1,258 @@
+html.settings-view,
+html.settings-view body,
+html.settings-view #root {
+  overflow: auto;
+  color: #f3f5f7;
+  background: #111318;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.settings-page {
+  min-height: 100%;
+  padding: 24px;
+  color: #f3f5f7;
+  background:
+    radial-gradient(circle at top right, rgb(67 111 91 / 16%), transparent 34%),
+    #111318;
+}
+
+.settings-page > header,
+.setting-row,
+.settings-page > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-page > header {
+  margin-bottom: 18px;
+}
+
+.settings-page header p {
+  margin: 0 0 2px;
+  color: #72e6ad;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.settings-page h1,
+.settings-page h2,
+.settings-page p {
+  margin-top: 0;
+}
+
+.settings-page h1 {
+  margin-bottom: 0;
+  font-size: 24px;
+}
+
+.settings-page h2 {
+  margin-bottom: 4px;
+  font-size: 15px;
+}
+
+.settings-page section {
+  margin-bottom: 12px;
+  padding: 16px;
+  background: rgb(255 255 255 / 4%);
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 14px;
+}
+
+.section-help,
+.permission-state {
+  color: #979faa;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin: 12px 0;
+  padding: 3px;
+  background: #20242b;
+  border-radius: 10px;
+}
+
+.segmented button,
+.icon-button,
+.secondary-button,
+.primary-button {
+  color: inherit;
+  cursor: pointer;
+  border: 0;
+}
+
+.segmented button {
+  padding: 8px;
+  color: #9da5af;
+  background: transparent;
+  border-radius: 8px;
+}
+
+.segmented button.selected {
+  color: #f3f5f7;
+  font-weight: 700;
+  background: #343a43;
+}
+
+.weekday-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.weekday-grid label {
+  position: relative;
+}
+
+.weekday-grid label > span {
+  display: block;
+  margin-bottom: 3px;
+  color: #9da5af;
+  font-size: 12px;
+}
+
+.weekday-grid input {
+  width: 100%;
+  height: 34px;
+  padding: 0 22px 0 8px;
+  color: #f3f5f7;
+  background: #191c22;
+  border: 1px solid #3a404a;
+  border-radius: 8px;
+}
+
+.weekday-grid label > small {
+  position: absolute;
+  right: 8px;
+  bottom: 9px;
+  color: #727b87;
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.weekday-grid.is-disabled {
+  opacity: 0.45;
+}
+
+.allocation-total,
+.permission-state {
+  margin: 9px 0 0;
+}
+
+.allocation-total {
+  color: #72e6ad;
+  font-size: 12px;
+}
+
+.allocation-total.is-error {
+  color: #ff767d;
+}
+
+.setting-row {
+  gap: 16px;
+}
+
+.setting-row > div {
+  min-width: 0;
+}
+
+.setting-row .section-help {
+  margin-bottom: 0;
+}
+
+.switch {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  flex: 0 0 42px;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+}
+
+.switch span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #3b414b;
+  border-radius: 999px;
+}
+
+.switch span::after {
+  display: block;
+  width: 18px;
+  height: 18px;
+  margin: 3px;
+  content: "";
+  background: #f3f5f7;
+  border-radius: 50%;
+  transition: transform 150ms ease;
+}
+
+.switch input:checked + span {
+  background: #3d9c72;
+}
+
+.switch input:checked + span::after {
+  transform: translateX(18px);
+}
+
+.icon-button {
+  width: 34px;
+  height: 34px;
+  font-size: 24px;
+  line-height: 1;
+  background: transparent;
+  border-radius: 8px;
+}
+
+.icon-button:hover,
+.secondary-button:hover {
+  background: rgb(255 255 255 / 8%);
+}
+
+.secondary-button,
+.primary-button {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 8px;
+}
+
+.secondary-button {
+  background: rgb(255 255 255 / 6%);
+}
+
+.primary-button {
+  min-width: 76px;
+  color: #0d1812;
+  background: #72e6ad;
+}
+
+.primary-button:disabled,
+.secondary-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.settings-page > footer {
+  min-height: 38px;
+  gap: 12px;
+}
+
+.settings-page > footer span {
+  color: #aeb5be;
+  font-size: 12px;
+}

@@ -3,8 +3,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
-import { calculatePace, paceLabel } from "./pace";
-import type { CliInfo, UsageViewState, UsageWindow } from "./types";
+import type {
+  CliInfo,
+  PaceViewState,
+  PaceWindowView,
+  UsageViewState,
+  UsageWindow,
+} from "./types";
 import {
   featuredWindow,
   formatResetTime,
@@ -17,6 +22,7 @@ import {
 import "./App.css";
 
 type OverlaySize = "small" | "middle" | "large";
+const INITIAL_PACE_STATE: PaceViewState = { windows: [], updatedAt: null };
 
 function isOverlaySize(value: unknown): value is OverlaySize {
   return value === "small" || value === "middle" || value === "large";
@@ -174,74 +180,134 @@ function MiddleOverlay({
   );
 }
 
+function paceVerdict(pace: PaceWindowView | undefined) {
+  if (!pace || pace.status === "unavailable") return "예측 준비 중";
+  if (pace.status === "exhaustionRisk") return "초기화 전 소진 예상";
+  return "초기화까지 충분";
+}
+
+function forecastBasisLabel(pace: PaceWindowView | undefined) {
+  if (!pace || pace.forecastBasis === "unavailable") return "관측 대기";
+  if (pace.forecastBasis === "recent") {
+    return `최근 ${Math.round((pace.observedHours ?? 0) * 10) / 10}시간`;
+  }
+  return pace.earlyEstimate ? "기간 평균 · 초기 추정" : "기간 평균";
+}
+
+function forecastLabel(pace: PaceWindowView | undefined) {
+  if (!pace || pace.forecastBasis === "unavailable") {
+    return "사용 기록이 쌓이면 예측합니다";
+  }
+  if (pace.projectedExhaustionAt !== null) {
+    return `${formatResetTime(pace.projectedExhaustionAt)} 소진 예상`;
+  }
+  if (pace.projectedEndPercent !== null) {
+    return `초기화 시 ${Math.round(pace.projectedEndPercent)}% 사용 예상`;
+  }
+  return "소진 시각을 계산할 수 없습니다";
+}
+
+function planLabel(pace: PaceWindowView | undefined) {
+  if (!pace || pace.planDeltaPercentPoints === null) return "권장선 계산 불가";
+  const delta = Math.round(pace.planDeltaPercentPoints);
+  if (delta > 0) return `계획보다 ${delta}%p 초과`;
+  if (delta < 0) return `${Math.abs(delta)}%p 여유`;
+  return "현재 권장과 동일";
+}
+
 function PaceRow({
-  usage,
   window,
+  pace,
 }: {
-  usage: UsageViewState;
   window: UsageWindow;
+  pace: PaceWindowView | undefined;
 }) {
-  const pace = calculatePace(window, usage);
-  const elapsedLabel =
-    pace.elapsedPercent === null ? "—" : `${Math.round(pace.elapsedPercent)}%`;
+  const usedPercent = Math.max(0, Math.min(100, window.usedPercent));
+  const plannedPercent =
+    pace?.plannedUsedPercent === null || pace?.plannedUsedPercent === undefined
+      ? null
+      : Math.max(0, Math.min(100, pace.plannedUsedPercent));
+  const status = pace?.status ?? "unavailable";
 
   return (
-    <article className="pace-row">
+    <article className={`pace-row status-${status}`}>
       <div className="pace-heading">
-        <WindowHeadingLabel window={window} />
+        <strong className="window-label">{windowLabel(window)}</strong>
         <span className={`tone-text-${usageTone(window.remainingPercent)}`}>
           {window.remainingPercent}% 남음
         </span>
       </div>
-      <div className="pace-bar-row">
-        <span>소진</span>
-        <div className="pace-meter" aria-label={`${pace.usedPercent}% 소진`}>
-          <i
-            className={`tone-${usageTone(window.remainingPercent)}`}
-            style={{ width: `${pace.usedPercent}%` }}
-          />
-        </div>
-        <strong>{Math.round(pace.usedPercent)}%</strong>
+      <strong className="pace-verdict">{paceVerdict(pace)}</strong>
+      <div className="pace-forecast">
+        <span>{forecastLabel(pace)}</span>
+        <i>{forecastBasisLabel(pace)}</i>
       </div>
-      <div className="pace-bar-row">
-        <span>기간</span>
-        <div className="pace-meter" aria-label={`${elapsedLabel} 경과`}>
-          {pace.elapsedPercent !== null && (
-            <i
-              className="elapsed"
-              style={{ width: `${pace.elapsedPercent}%` }}
-            />
-          )}
-        </div>
-        <strong>{elapsedLabel}</strong>
+      <div
+        className="pace-progress"
+        aria-label={`${Math.round(usedPercent)}% 사용, 현재 권장 ${
+          plannedPercent === null ? "계산 불가" : `${Math.round(plannedPercent)}%`
+        }`}
+      >
+        <span style={{ width: `${usedPercent}%` }} />
+        {plannedPercent !== null && (
+          <>
+            <i style={{ left: `${plannedPercent}%` }} aria-hidden="true" />
+            <b style={{ left: `${plannedPercent}%` }}>현재 권장</b>
+          </>
+        )}
       </div>
       <div className="pace-footer">
-        <span>{paceLabel(pace)}</span>
-        <small>{formatResetTime(window.resetsAt)} 리셋</small>
+        <span>{planLabel(pace)}</span>
+        <small>{formatResetTime(window.resetsAt)} 초기화</small>
       </div>
     </article>
   );
 }
 
-function LargeOverlay({ usage }: { usage: UsageViewState }) {
+function LargeOverlay({
+  usage,
+  pace,
+}: {
+  usage: UsageViewState;
+  pace: PaceViewState;
+}) {
   const windows = useMemo(() => sortedWindows(usage.windows), [usage.windows]);
+  const paceByWindow = useMemo(
+    () => new Map(pace.windows.map((window) => [window.windowId, window])),
+    [pace.windows],
+  );
   if (windows.length === 0) return <EmptySurface usage={usage} />;
 
   return (
     <div
       className={`pace-list ${usage.connection === "stale" ? "is-stale" : ""}`}
       role="region"
-      aria-label="Codex 균등 페이스"
+      aria-label="Codex 페이스 예측"
     >
-      {windows.map((window) => (
-        <PaceRow key={window.id} usage={usage} window={window} />
-      ))}
+      <header className="pace-list-header">
+        <strong>Codex Pace</strong>
+        <small>
+          {usage.connection === "stale"
+            ? staleLabel(usage.lastSuccessfulAt)
+            : "최신 사용량"}
+        </small>
+      </header>
+      <div className="pace-rows">
+        {windows.map((window) => (
+          <PaceRow
+            key={window.id}
+            window={window}
+            pace={paceByWindow.get(window.id)}
+          />
+        ))}
+      </div>
     </div>
   );
 }
 
 function App() {
   const [usage, setUsage] = useState<UsageViewState>(INITIAL_USAGE_STATE);
+  const [pace, setPace] = useState<PaceViewState>(INITIAL_PACE_STATE);
   const [sizeMode, setSizeMode] = useState<OverlaySize>("middle");
   const [sizeReady, setSizeReady] = useState(false);
   const draggingRef = useRef(false);
@@ -286,6 +352,7 @@ function App() {
 
   useEffect(() => {
     void invoke<UsageViewState>("get_usage_state").then(setUsage);
+    void invoke<PaceViewState>("get_pace_state").then(setPace);
     void invoke<OverlaySize>("get_overlay_size")
       .then((size) => {
         if (isOverlaySize(size)) setSizeMode(size);
@@ -301,10 +368,15 @@ function App() {
         if (isOverlaySize(event.payload)) setSizeMode(event.payload);
       },
     );
+    const unlistenPace = listen<PaceViewState>(
+      "pace://state-changed",
+      (event) => setPace(event.payload),
+    );
     const unlistenPickCli = listen("usage://pick-cli", () => void chooseCli());
     return () => {
       void unlistenUsage.then((unlisten) => unlisten());
       void unlistenOverlaySize.then((unlisten) => unlisten());
+      void unlistenPace.then((unlisten) => unlisten());
       void unlistenPickCli.then((unlisten) => unlisten());
     };
   }, [chooseCli]);
@@ -332,7 +404,7 @@ function App() {
       ) : sizeMode === "middle" ? (
         <MiddleOverlay usage={usage} featured={featured} />
       ) : (
-        <LargeOverlay usage={usage} />
+        <LargeOverlay usage={usage} pace={pace} />
       )}
     </main>
   );
