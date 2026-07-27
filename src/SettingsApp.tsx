@@ -115,18 +115,27 @@ function SettingsApp() {
     }
   };
 
+  const closeSettings = async () => {
+    setMessage("");
+    try {
+      await getCurrentWindow().hide();
+    } catch {
+      setMessage("설정 창을 닫을 수 없습니다.");
+    }
+  };
+
   return (
     <main className="settings-page">
-      <header>
-        <div>
-          <p>Codex Pace</p>
-          <h1>페이스 설정</h1>
+      <header data-tauri-drag-region>
+        <div data-tauri-drag-region>
+          <p data-tauri-drag-region>Codex Pace</p>
+          <h1 data-tauri-drag-region>페이스 설정</h1>
         </div>
         <button
           className="icon-button"
           type="button"
           aria-label="설정 닫기"
-          onClick={() => void getCurrentWindow().hide()}
+          onClick={() => void closeSettings()}
         >
           ×
         </button>
