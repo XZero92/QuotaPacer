@@ -548,7 +548,8 @@ fn advance_alerts(
         if notify_exhaustion {
             if let Some(exhaustion_at) = pace.projected_exhaustion_at {
                 let lead_minutes = ((resets_at - exhaustion_at).max(0) + 59) / 60;
-                parts.push(format!("초기화보다 {lead_minutes}분 먼저 소진 예상"));
+                let lead = format_lead_duration(lead_minutes);
+                parts.push(format!("초기화보다 약 {lead} 먼저 소진 예상"));
             }
             alert.exhaustion_notified = true;
         }
@@ -566,6 +567,30 @@ fn next_streak(current: u8, candidate: bool) -> u8 {
     } else {
         0
     }
+}
+
+fn format_lead_duration(total_minutes: i64) -> String {
+    let total_minutes = total_minutes.max(0);
+    let days = total_minutes / (24 * 60);
+    let hours = (total_minutes % (24 * 60)) / 60;
+    let minutes = total_minutes % 60;
+
+    if days > 0 {
+        if hours > 0 {
+            return format!("{days}일 {hours}시간");
+        }
+        if minutes > 0 {
+            return format!("{days}일 {minutes}분");
+        }
+        return format!("{days}일");
+    }
+    if hours > 0 {
+        if minutes > 0 {
+            return format!("{hours}시간 {minutes}분");
+        }
+        return format!("{hours}시간");
+    }
+    format!("{minutes}분")
 }
 
 fn window_duration_label(duration_minutes: Option<i64>) -> String {
@@ -846,7 +871,21 @@ mod tests {
         let exhaustion = advance_alerts(&mut runtime, &usage, &view, true);
         assert_eq!(exhaustion.len(), 1);
         assert!(exhaustion[0].title.contains("초기화 전 소진 예상"));
+        assert!(exhaustion[0]
+            .body
+            .contains("초기화보다 약 1분 먼저 소진 예상"));
         assert!(advance_alerts(&mut runtime, &usage, &view, true).is_empty());
+    }
+
+    #[test]
+    fn notification_lead_duration_uses_readable_units() {
+        assert_eq!(format_lead_duration(0), "0분");
+        assert_eq!(format_lead_duration(59), "59분");
+        assert_eq!(format_lead_duration(60), "1시간");
+        assert_eq!(format_lead_duration(90), "1시간 30분");
+        assert_eq!(format_lead_duration(24 * 60), "1일");
+        assert_eq!(format_lead_duration(25 * 60), "1일 1시간");
+        assert_eq!(format_lead_duration(25 * 60 + 30), "1일 1시간");
     }
 
     #[test]
