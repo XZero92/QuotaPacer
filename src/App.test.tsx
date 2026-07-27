@@ -136,7 +136,7 @@ describe("Codex 사용량 오버레이", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("large는 상태 판정, 예측, 권장선을 모든 실제 제한 창에 표시한다", async () => {
+  it("large는 상태 판정, bullet gauge, forecast timeline을 모든 실제 제한 창에 표시한다", async () => {
     const multiWindow: UsageViewState = {
       ...weeklyOnly,
       windows: [
@@ -176,15 +176,21 @@ describe("Codex 사용량 오버레이", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Codex Pace")).toBeInTheDocument();
     expect(screen.queryByText(/^Codex$/)).not.toBeInTheDocument();
-    expect(screen.getByText("17%p 여유")).toBeInTheDocument();
+    expect(screen.getByText("권장보다 17%p 여유")).toBeInTheDocument();
     expect(screen.getByText("계획보다 18%p 초과")).toBeInTheDocument();
-    expect(screen.getByText("초기화까지 충분")).toBeInTheDocument();
+    expect(screen.getByText("현재 페이스 유지 가능")).toBeInTheDocument();
     expect(screen.getByText("초기화 전 소진 예상")).toBeInTheDocument();
     expect(screen.getByText("기간 평균")).toBeInTheDocument();
     expect(screen.getByText("최근 8.3시간")).toBeInTheDocument();
+    expect(screen.getAllByText("초기화 시 52% 사용 예상")).toHaveLength(2);
     expect(
-      screen.getByLabelText("26% 사용, 현재 권장 43%"),
+      screen.getByLabelText("26% 사용, 현재 권장 43%, 권장보다 17%p 여유"),
     ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText(/소진 예상, 초기화보다 약 45분 빠름/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("사용 26%")).toBeInTheDocument();
+    expect(screen.getByText("권장 43%")).toBeInTheDocument();
     expect(screen.getByText("주간")).toBeInTheDocument();
     expect(screen.getByText("5시간")).toBeInTheDocument();
     await waitFor(() =>
@@ -198,7 +204,9 @@ describe("Codex 사용량 오버레이", () => {
   it("large는 페이스 갱신 이벤트의 계획 초과 상태를 반영한다", async () => {
     mockStartup("large");
     render(<App />);
-    expect(await screen.findByText("초기화까지 충분")).toBeInTheDocument();
+    expect(
+      await screen.findByText("현재 페이스 유지 가능"),
+    ).toBeInTheDocument();
 
     mocks.listeners.get("pace://state-changed")?.({
       payload: {
@@ -214,7 +222,193 @@ describe("Codex 사용량 오버레이", () => {
     });
 
     expect(await screen.findByText("계획보다 4%p 초과")).toBeInTheDocument();
-    expect(screen.getByText("초기화까지 충분")).toBeInTheDocument();
+    expect(screen.getByText("현재 계획을 초과했습니다")).toBeInTheDocument();
+  });
+
+  it("large는 계획 차이의 raw 1%p 경계를 적용하고 초과 구간만 강조한다", async () => {
+    mockStartup(
+      "large",
+      {
+        ...weeklyOnly,
+        windows: [{ ...weeklyOnly.windows[0], usedPercent: 44 }],
+      },
+      {
+        ...weeklyPace,
+        windows: [
+          {
+            ...weeklyPace.windows[0],
+            plannedUsedPercent: 42.9,
+            planDeltaPercentPoints: 1.01,
+            status: "planExceeded",
+          },
+        ],
+      },
+    );
+    const { container } = render(<App />);
+
+    expect(
+      await screen.findByText("현재 계획을 초과했습니다"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("계획보다 1%p 초과")).toBeInTheDocument();
+    const overrun = container.querySelector<HTMLElement>(".gauge-overrun");
+    expect(overrun).toHaveStyle({ left: "42.9%" });
+    expect(Number.parseFloat(overrun?.style.width ?? "")).toBeCloseTo(1.1);
+
+    mocks.listeners.get("pace://state-changed")?.({
+      payload: {
+        ...weeklyPace,
+        windows: [
+          {
+            ...weeklyPace.windows[0],
+            plannedUsedPercent: 43,
+            planDeltaPercentPoints: 1,
+            status: "safe",
+          },
+        ],
+      },
+    });
+
+    expect(await screen.findByText("권장선 부근")).toBeInTheDocument();
+    expect(container.querySelector(".gauge-overrun")).not.toBeInTheDocument();
+  });
+
+  it("large는 초기 소진 추정과 확정 소진 위험을 서로 다른 상태로 표시한다", async () => {
+    const riskPace: PaceViewState = {
+      windows: [
+        {
+          ...weeklyPace.windows[0],
+          projectedExhaustionAt: 800_000,
+          projectedEndPercent: 120,
+          status: "exhaustionRisk",
+          earlyEstimate: true,
+        },
+      ],
+      updatedAt: weeklyPace.updatedAt,
+    };
+    mockStartup("large", weeklyOnly, riskPace);
+    const { container } = render(<App />);
+
+    expect(
+      await screen.findByText("초기 추정 · 소진 가능성 있음"),
+    ).toBeInTheDocument();
+    expect(container.querySelector(".status-earlyRisk")).toBeInTheDocument();
+    expect(screen.getByText(/초기 추정 · 초기화보다 약/)).toBeInTheDocument();
+    expect(
+      Number.parseFloat(
+        container.querySelector<HTMLElement>(".timeline-marker")?.style.left ??
+          "",
+      ),
+    ).toBeCloseTo(43, 0);
+
+    mocks.listeners.get("pace://state-changed")?.({
+      payload: {
+        ...riskPace,
+        windows: [{ ...riskPace.windows[0], earlyEstimate: false }],
+      },
+    });
+
+    expect(await screen.findByText("초기화 전 소진 예상")).toBeInTheDocument();
+    expect(
+      container.querySelector(".status-exhaustionRisk"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/소진 · 초기화보다 약/)).toBeInTheDocument();
+  });
+
+  it("large는 권장선 0%와 100%에서 marker를 카드 안쪽으로 정렬한다", async () => {
+    const edgeUsage: UsageViewState = {
+      ...weeklyOnly,
+      windows: [
+        { ...weeklyOnly.windows[0], id: "start" },
+        { ...weeklyOnly.windows[0], id: "end", windowDurationMins: 300 },
+      ],
+    };
+    mockStartup("large", edgeUsage, {
+      windows: [
+        { ...weeklyPace.windows[0], windowId: "start", plannedUsedPercent: 0 },
+        { ...weeklyPace.windows[0], windowId: "end", plannedUsedPercent: 100 },
+      ],
+      updatedAt: weeklyPace.updatedAt,
+    });
+    const { container } = render(<App />);
+
+    await screen.findByRole("region", { name: "Codex 페이스 예측" });
+    expect(container.querySelector(".gauge-marker.align-start")).toHaveStyle({
+      left: "0%",
+    });
+    expect(container.querySelector(".gauge-marker.align-end")).toHaveStyle({
+      left: "100%",
+    });
+  });
+
+  it("large는 예측 결측과 계획 결측을 명시하고 marker를 생략한다", async () => {
+    mockStartup("large", weeklyOnly, {
+      windows: [
+        {
+          ...weeklyPace.windows[0],
+          forecastBasis: "unavailable",
+          projectedEndPercent: null,
+          plannedUsedPercent: null,
+          planDeltaPercentPoints: null,
+          status: "unavailable",
+        },
+      ],
+      updatedAt: null,
+    });
+    const { container } = render(<App />);
+
+    expect(await screen.findByText("예측 준비 중")).toBeInTheDocument();
+    expect(screen.getByText("권장선 계산 불가")).toBeInTheDocument();
+    expect(screen.getAllByText("사용 기록이 더 필요합니다")).toHaveLength(2);
+    expect(container.querySelector(".gauge-marker")).not.toBeInTheDocument();
+    expect(container.querySelector(".timeline-marker")).not.toBeInTheDocument();
+  });
+
+  it("large는 초기화 시점과 같은 소진 예측을 안전 상태로 표시한다", async () => {
+    mockStartup("large", weeklyOnly, {
+      windows: [
+        {
+          ...weeklyPace.windows[0],
+          projectedExhaustionAt: weeklyOnly.windows[0].resetsAt,
+          projectedEndPercent: null,
+          status: "exhaustionRisk",
+        },
+      ],
+      updatedAt: weeklyPace.updatedAt,
+    });
+    const { container } = render(<App />);
+
+    expect(
+      await screen.findByText("현재 페이스 유지 가능"),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("초기화 시 100% 사용 예상")).toHaveLength(2);
+    expect(container.querySelector(".timeline-marker")).not.toBeInTheDocument();
+  });
+
+  it("large는 소진 선행 시간을 OS 알림과 같은 일·시간 단위로 표시한다", async () => {
+    const resetsAt = weeklyOnly.windows[0].resetsAt!;
+    mockStartup(
+      "large",
+      {
+        ...weeklyOnly,
+        windows: [{ ...weeklyOnly.windows[0], resetsAt }],
+      },
+      {
+        windows: [
+          {
+            ...weeklyPace.windows[0],
+            projectedExhaustionAt: resetsAt - (25 * 60 + 30) * 60,
+            projectedEndPercent: 120,
+            status: "exhaustionRisk",
+          },
+        ],
+        updatedAt: weeklyPace.updatedAt,
+      },
+    );
+    render(<App />);
+
+    expect(
+      await screen.findByText("소진 · 초기화보다 약 1일 1시간 빠름"),
+    ).toBeInTheDocument();
   });
 
   it("우클릭하면 네이티브 오버레이 메뉴를 요청한다", async () => {
@@ -252,6 +446,31 @@ describe("Codex 사용량 오버레이", () => {
       await screen.findByText("업데이트 지연 · 2분 전"),
     ).toBeInTheDocument();
     expect(screen.getByText("주간")).toBeInTheDocument();
+  });
+
+  it("stale 상태에서도 small과 large 카드 전체를 흐리게 하지 않는다", async () => {
+    const staleUsage: UsageViewState = {
+      ...weeklyOnly,
+      connection: "stale",
+      lastSuccessfulAt: Math.floor(Date.now() / 1_000) - 120,
+    };
+    mockStartup("small", staleUsage);
+    const firstRender = render(<App />);
+
+    const small = await screen.findByLabelText("Codex · 주간 제한 74% 남음");
+    expect(small).toHaveClass("is-stale");
+    expect(getComputedStyle(small).opacity).not.toBe("0.58");
+    firstRender.unmount();
+
+    mockStartup("large", staleUsage);
+    render(<App />);
+
+    const large = await screen.findByRole("region", {
+      name: "Codex 페이스 예측",
+    });
+    expect(large).toHaveClass("is-stale");
+    expect(large).toHaveTextContent("업데이트 지연 · 2분 전");
+    expect(getComputedStyle(large).opacity).not.toBe("0.68");
   });
 
   it("인증됐지만 제한 창이 없으면 퍼센티지를 만들지 않는다", async () => {

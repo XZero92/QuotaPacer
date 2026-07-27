@@ -307,7 +307,7 @@ fn calculate_window(
         PaceStatus::ExhaustionRisk
     } else if plan_exceeded {
         PaceStatus::PlanExceeded
-    } else if forecast.is_some() || plan.is_some() {
+    } else if forecast.is_some() {
         PaceStatus::Safe
     } else {
         PaceStatus::Unavailable
@@ -759,6 +759,52 @@ mod tests {
         assert_eq!(pace.forecast_basis, ForecastBasis::Unavailable);
         assert_eq!(pace.status, PaceStatus::Unavailable);
         assert_eq!(pace.planned_used_percent, None);
+    }
+
+    #[test]
+    fn plan_without_a_forecast_is_not_reported_as_safe() {
+        let resets_at = 7 * DAY_SECONDS;
+        let window = weekly_window(0, resets_at);
+        let pace = calculate_window(&window, 0, &PaceSettings::default(), &[], Some(0));
+
+        assert_eq!(pace.forecast_basis, ForecastBasis::Unavailable);
+        assert!(pace.planned_used_percent.is_some());
+        assert_eq!(pace.status, PaceStatus::Unavailable);
+    }
+
+    #[test]
+    fn plan_exceeded_without_a_forecast_still_alerts() {
+        let resets_at = 7 * DAY_SECONDS;
+        let as_of = 0;
+        let usage = usage(weekly_window(20, resets_at), as_of);
+        let view = calculate_state(&usage, &PaceSettings::default(), &[]);
+        let mut runtime = PaceRuntime::default();
+
+        assert_eq!(view.windows[0].forecast_basis, ForecastBasis::Unavailable);
+        assert_eq!(view.windows[0].status, PaceStatus::PlanExceeded);
+        assert!(view.windows[0].projected_end_percent.is_none());
+        assert!(advance_alerts(&mut runtime, &usage, &view, true).is_empty());
+        let notifications = advance_alerts(&mut runtime, &usage, &view, true);
+        assert_eq!(notifications.len(), 1);
+        assert!(notifications[0].title.contains("사용 계획 초과"));
+        assert!(runtime.history.alerts[0].plan_notified);
+        assert!(!runtime.history.alerts[0].exhaustion_notified);
+    }
+
+    #[test]
+    fn exhaustion_exactly_at_reset_is_safe() {
+        let resets_at = 100 * 60;
+        let as_of = 50 * 60;
+        let window = UsageWindow {
+            window_duration_mins: Some(100),
+            resets_at: Some(resets_at),
+            ..weekly_window(50, resets_at)
+        };
+        let pace = calculate_window(&window, as_of, &PaceSettings::default(), &[], None);
+
+        assert_eq!(pace.projected_exhaustion_at, Some(resets_at));
+        assert_eq!(pace.projected_end_percent, Some(100.0));
+        assert_eq!(pace.status, PaceStatus::Safe);
     }
 
     #[test]

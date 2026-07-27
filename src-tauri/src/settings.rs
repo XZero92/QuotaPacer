@@ -69,7 +69,7 @@ impl OverlaySize {
         match self {
             Self::Small => (152.0, 56.0),
             Self::Middle => (280.0, 72.0),
-            Self::Large => (360.0, 196.0),
+            Self::Large => (360.0, 240.0),
         }
     }
 }
@@ -207,6 +207,7 @@ mod tests {
         let settings: AppSettings = serde_json::from_str(r#"{"overlaySize":"large"}"#).unwrap();
 
         assert_eq!(settings.overlay_size, OverlaySize::Large);
+        assert_eq!(settings.overlay_size.base_dimensions(), (360.0, 240.0));
         assert!(serde_json::to_string(&settings)
             .unwrap()
             .contains(r#""overlaySize":"large""#));

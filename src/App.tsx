@@ -180,10 +180,46 @@ function MiddleOverlay({
   );
 }
 
-function paceVerdict(pace: PaceWindowView | undefined) {
-  if (!pace || pace.status === "unavailable") return "예측 준비 중";
-  if (pace.status === "exhaustionRisk") return "초기화 전 소진 예상";
-  return "초기화까지 충분";
+type PaceDisplayStatus =
+  "safe" | "planExceeded" | "earlyRisk" | "exhaustionRisk" | "unavailable";
+
+function paceDisplayStatus(
+  pace: PaceWindowView | undefined,
+  resetsAt: number | null,
+): PaceDisplayStatus {
+  if (!pace) return "unavailable";
+
+  const exhaustionBeforeReset =
+    pace.projectedExhaustionAt !== null &&
+    resetsAt !== null &&
+    pace.projectedExhaustionAt < resetsAt;
+
+  if (pace.status === "exhaustionRisk" && exhaustionBeforeReset) {
+    return pace.earlyEstimate ? "earlyRisk" : "exhaustionRisk";
+  }
+  if (pace.status === "planExceeded") return "planExceeded";
+  if (
+    pace.forecastBasis !== "unavailable" &&
+    (pace.projectedEndPercent !== null || pace.projectedExhaustionAt !== null)
+  ) {
+    return "safe";
+  }
+  return "unavailable";
+}
+
+function paceVerdict(status: PaceDisplayStatus) {
+  switch (status) {
+    case "safe":
+      return "현재 페이스 유지 가능";
+    case "planExceeded":
+      return "현재 계획을 초과했습니다";
+    case "earlyRisk":
+      return "초기 추정 · 소진 가능성 있음";
+    case "exhaustionRisk":
+      return "초기화 전 소진 예상";
+    default:
+      return "예측 준비 중";
+  }
 }
 
 function forecastBasisLabel(pace: PaceWindowView | undefined) {
@@ -194,11 +230,17 @@ function forecastBasisLabel(pace: PaceWindowView | undefined) {
   return pace.earlyEstimate ? "기간 평균 · 초기 추정" : "기간 평균";
 }
 
-function forecastLabel(pace: PaceWindowView | undefined) {
+function forecastLabel(
+  pace: PaceWindowView | undefined,
+  resetsAt: number | null,
+) {
   if (!pace || pace.forecastBasis === "unavailable") {
-    return "사용 기록이 쌓이면 예측합니다";
+    return "사용 기록이 더 필요합니다";
   }
   if (pace.projectedExhaustionAt !== null) {
+    if (resetsAt !== null && pace.projectedExhaustionAt === resetsAt) {
+      return "초기화 시 100% 사용 예상";
+    }
     return `${formatResetTime(pace.projectedExhaustionAt)} 소진 예상`;
   }
   if (pace.projectedEndPercent !== null) {
@@ -209,57 +251,193 @@ function forecastLabel(pace: PaceWindowView | undefined) {
 
 function planLabel(pace: PaceWindowView | undefined) {
   if (!pace || pace.planDeltaPercentPoints === null) return "권장선 계산 불가";
-  const delta = Math.round(pace.planDeltaPercentPoints);
-  if (delta > 0) return `계획보다 ${delta}%p 초과`;
-  if (delta < 0) return `${Math.abs(delta)}%p 여유`;
-  return "현재 권장과 동일";
+  const rawDelta = pace.planDeltaPercentPoints;
+  const delta = Math.round(Math.abs(rawDelta));
+  if (rawDelta > 1) return `계획보다 ${delta}%p 초과`;
+  if (rawDelta < -1) return `권장보다 ${delta}%p 여유`;
+  return "권장선 부근";
+}
+
+function formatLeadDuration(seconds: number) {
+  const totalMinutes = Math.max(0, Math.ceil(seconds / 60));
+  const days = Math.floor(totalMinutes / (24 * 60));
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+  const minutes = totalMinutes % 60;
+
+  if (days > 0) {
+    if (hours > 0) return `${days}일 ${hours}시간`;
+    if (minutes > 0) return `${days}일 ${minutes}분`;
+    return `${days}일`;
+  }
+  if (hours > 0) {
+    if (minutes > 0) return `${hours}시간 ${minutes}분`;
+    return `${hours}시간`;
+  }
+  return `${minutes}분`;
+}
+
+function markerAlignment(percent: number) {
+  if (percent <= 8) return "start";
+  if (percent >= 92) return "end";
+  return "center";
+}
+
+function ForecastTimeline({
+  pace,
+  resetsAt,
+  updatedAt,
+  status,
+}: {
+  pace: PaceWindowView | undefined;
+  resetsAt: number | null;
+  updatedAt: number | null;
+  status: PaceDisplayStatus;
+}) {
+  const exhaustionAt = pace?.projectedExhaustionAt ?? null;
+  const hasRange =
+    updatedAt !== null && resetsAt !== null && resetsAt > updatedAt;
+  const isRisk =
+    (status === "earlyRisk" || status === "exhaustionRisk") &&
+    exhaustionAt !== null &&
+    hasRange &&
+    exhaustionAt < resetsAt;
+  const markerPercent = isRisk
+    ? Math.max(
+        0,
+        Math.min(
+          100,
+          ((exhaustionAt - updatedAt) / (resetsAt - updatedAt)) * 100,
+        ),
+      )
+    : null;
+  const projectedEndPercent =
+    exhaustionAt !== null && resetsAt !== null && exhaustionAt === resetsAt
+      ? 100
+      : pace?.projectedEndPercent;
+
+  let detail = "사용 기록이 더 필요합니다";
+  let accessibleDetail = detail;
+  if (isRisk) {
+    const riskLabel = status === "earlyRisk" ? "초기 추정" : "소진";
+    accessibleDetail = `초기화보다 약 ${formatLeadDuration(
+      resetsAt - exhaustionAt,
+    )} 빠름`;
+    detail = `${riskLabel} · ${accessibleDetail}`;
+  } else if (
+    status !== "unavailable" &&
+    projectedEndPercent !== null &&
+    projectedEndPercent !== undefined
+  ) {
+    detail = `초기화 시 ${Math.round(projectedEndPercent)}% 사용 예상`;
+    accessibleDetail = detail;
+  }
+
+  const timelineLabel = isRisk
+    ? `${formatResetTime(exhaustionAt)} 소진 예상, ${accessibleDetail}`
+    : detail;
+
+  return (
+    <div className={`forecast-timeline timeline-${status}`}>
+      <div className="timeline-endpoints" aria-hidden="true">
+        <span>현재</span>
+        <span>
+          {resetsAt === null
+            ? "초기화 시각 미정"
+            : `${formatResetTime(resetsAt)} 초기화`}
+        </span>
+      </div>
+      <div className="timeline-track" role="img" aria-label={timelineLabel}>
+        {markerPercent !== null && (
+          <span
+            className={`timeline-marker align-${markerAlignment(markerPercent)}`}
+            style={{ left: `${markerPercent}%` }}
+          >
+            <i aria-hidden="true" />
+          </span>
+        )}
+      </div>
+      <div className="timeline-detail">{detail}</div>
+    </div>
+  );
 }
 
 function PaceRow({
   window,
   pace,
+  updatedAt,
 }: {
   window: UsageWindow;
   pace: PaceWindowView | undefined;
+  updatedAt: number | null;
 }) {
   const usedPercent = Math.max(0, Math.min(100, window.usedPercent));
   const plannedPercent =
     pace?.plannedUsedPercent === null || pace?.plannedUsedPercent === undefined
       ? null
       : Math.max(0, Math.min(100, pace.plannedUsedPercent));
-  const status = pace?.status ?? "unavailable";
+  const status = paceDisplayStatus(pace, window.resetsAt);
+  const hasOverrun =
+    plannedPercent !== null &&
+    (pace?.planDeltaPercentPoints ?? 0) > 1 &&
+    usedPercent > plannedPercent;
+  const overrunWidth =
+    hasOverrun && plannedPercent !== null ? usedPercent - plannedPercent : 0;
 
   return (
     <article className={`pace-row status-${status}`}>
       <div className="pace-heading">
         <strong className="window-label">{windowLabel(window)}</strong>
-        <span className={`tone-text-${usageTone(window.remainingPercent)}`}>
-          {window.remainingPercent}% 남음
-        </span>
+        <span className="pace-remaining">{window.remainingPercent}% 남음</span>
       </div>
-      <strong className="pace-verdict">{paceVerdict(pace)}</strong>
+      <strong className="pace-verdict">{paceVerdict(status)}</strong>
       <div className="pace-forecast">
-        <span>{forecastLabel(pace)}</span>
+        <span>{forecastLabel(pace, window.resetsAt)}</span>
         <i>{forecastBasisLabel(pace)}</i>
       </div>
+      <div className="gauge-labels" aria-hidden="true">
+        <span>사용 {Math.round(usedPercent)}%</span>
+        <span>
+          {plannedPercent === null
+            ? "권장 계산 불가"
+            : `권장 ${Math.round(plannedPercent)}%`}
+        </span>
+      </div>
       <div
-        className="pace-progress"
+        className="pace-gauge"
+        role="img"
         aria-label={`${Math.round(usedPercent)}% 사용, 현재 권장 ${
-          plannedPercent === null ? "계산 불가" : `${Math.round(plannedPercent)}%`
-        }`}
+          plannedPercent === null
+            ? "계산 불가"
+            : `${Math.round(plannedPercent)}%`
+        }, ${planLabel(pace)}`}
       >
-        <span style={{ width: `${usedPercent}%` }} />
+        <span className="gauge-actual" style={{ width: `${usedPercent}%` }} />
+        {hasOverrun && plannedPercent !== null && (
+          <span
+            className="gauge-overrun"
+            style={{
+              left: `${plannedPercent}%`,
+              width: `${overrunWidth}%`,
+            }}
+          />
+        )}
         {plannedPercent !== null && (
-          <>
-            <i style={{ left: `${plannedPercent}%` }} aria-hidden="true" />
-            <b style={{ left: `${plannedPercent}%` }}>현재 권장</b>
-          </>
+          <i
+            className={`gauge-marker align-${markerAlignment(plannedPercent)}`}
+            style={{ left: `${plannedPercent}%` }}
+            aria-hidden="true"
+          />
         )}
       </div>
-      <div className="pace-footer">
-        <span>{planLabel(pace)}</span>
-        <small>{formatResetTime(window.resetsAt)} 초기화</small>
+      <div className={`plan-detail ${hasOverrun ? "is-overrun" : ""}`}>
+        {planLabel(pace)}
       </div>
+      <ForecastTimeline
+        pace={pace}
+        resetsAt={window.resetsAt}
+        updatedAt={updatedAt}
+        status={status}
+      />
     </article>
   );
 }
@@ -298,6 +476,7 @@ function LargeOverlay({
             key={window.id}
             window={window}
             pace={paceByWindow.get(window.id)}
+            updatedAt={pace.updatedAt}
           />
         ))}
       </div>

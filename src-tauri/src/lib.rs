@@ -347,7 +347,7 @@ fn overlay_dimensions(size: OverlaySize, window_count: usize) -> (f64, f64) {
     }
 
     let extra_rows = window_count.saturating_sub(1) as f64;
-    (360.0, (196.0 + extra_rows * 132.0).min(520.0))
+    (360.0, (240.0 + extra_rows * 176.0).min(520.0))
 }
 
 fn resize_overlay_window(
@@ -543,12 +543,12 @@ mod tests {
     fn collapsed_dimensions_follow_the_selected_information_density() {
         assert_eq!(overlay_dimensions(OverlaySize::Small, 1), (152.0, 56.0));
         assert_eq!(overlay_dimensions(OverlaySize::Middle, 1), (280.0, 72.0));
-        assert_eq!(overlay_dimensions(OverlaySize::Large, 1), (360.0, 196.0));
+        assert_eq!(overlay_dimensions(OverlaySize::Large, 1), (360.0, 240.0));
     }
 
     #[test]
     fn large_layout_grows_per_window_and_bounds_its_height() {
-        assert_eq!(overlay_dimensions(OverlaySize::Large, 2), (360.0, 328.0));
+        assert_eq!(overlay_dimensions(OverlaySize::Large, 2), (360.0, 416.0));
         assert_eq!(overlay_dimensions(OverlaySize::Large, 100), (360.0, 520.0));
     }
 
