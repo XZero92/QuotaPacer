@@ -69,7 +69,7 @@ body,
 }
 
 .small-card {
-  --tone: #72e6ad;
+  --tone: var(--color-actual);
   position: relative;
   display: flex;
   width: 152px;
@@ -231,10 +231,9 @@ body,
 
 .usage-meter span,
 .pace-meter i {
-  --tone: #72e6ad;
   display: block;
   height: 100%;
-  background: var(--tone);
+  background: var(--tone, var(--color-actual));
   border-radius: inherit;
 }
 
@@ -592,24 +591,28 @@ body,
   font-size: 12px;
 }
 
+.tone-normal {
+  --tone: var(--color-actual);
+}
+
 .tone-warning {
-  --tone: #f4b95f;
+  --tone: var(--color-plan-warning);
 }
 
 .tone-danger {
-  --tone: #ff6b72;
+  --tone: var(--color-exhaustion-danger);
 }
 
 .tone-text-warning {
-  color: #f4b95f;
+  color: var(--color-plan-warning);
 }
 
 .tone-text-danger {
-  color: #ff6b72;
+  color: var(--color-exhaustion-danger);
 }
 
 .tone-text-normal {
-  color: #72e6ad;
+  color: var(--color-actual);
 }
 
 @media (prefers-reduced-motion: no-preference) {

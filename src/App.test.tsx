@@ -136,6 +136,39 @@ describe("Codex 사용량 오버레이", () => {
     ).not.toBeInTheDocument();
   });
 
+  it.each([
+    { remainingPercent: 74, tone: "normal", token: "--color-actual" },
+    { remainingPercent: 50, tone: "warning", token: "--color-plan-warning" },
+    {
+      remainingPercent: 19,
+      tone: "danger",
+      token: "--color-exhaustion-danger",
+    },
+  ])(
+    "middle 게이지는 잔여량 $remainingPercent%에 $tone 색상을 적용한다",
+    async ({ remainingPercent, tone, token }) => {
+      mockStartup("middle", {
+        ...weeklyOnly,
+        windows: [
+          {
+            ...weeklyOnly.windows[0],
+            usedPercent: 100 - remainingPercent,
+            remainingPercent,
+          },
+        ],
+      });
+      render(<App />);
+
+      const meter = await screen.findByLabelText(`${remainingPercent}% 남음`);
+      const fill = meter.firstElementChild;
+
+      expect(fill).toHaveClass(`tone-${tone}`);
+      expect(getComputedStyle(fill!).getPropertyValue("--tone").trim()).toBe(
+        `var(${token})`,
+      );
+    },
+  );
+
   it("large는 상태 판정, bullet gauge, forecast timeline을 모든 실제 제한 창에 표시한다", async () => {
     const multiWindow: UsageViewState = {
       ...weeklyOnly,
