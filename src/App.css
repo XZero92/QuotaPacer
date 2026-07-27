@@ -235,6 +235,7 @@ body,
 .pace-list {
   width: 360px;
   height: 100%;
+  padding: 8px 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
@@ -254,7 +255,6 @@ body,
   z-index: 3;
   top: 0;
   display: flex;
-  height: 62px;
   padding: 12px 16px;
   align-items: center;
   justify-content: space-between;
