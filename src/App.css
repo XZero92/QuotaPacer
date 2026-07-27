@@ -255,7 +255,7 @@ body,
   top: 0;
   display: flex;
   height: 62px;
-  padding: 14px 16px 10px;
+  padding: 12px 16px;
   align-items: center;
   justify-content: space-between;
   background: #14161a;
@@ -279,7 +279,7 @@ body,
 .pace-row {
   --status-tone: #72e6ad;
   min-height: 132px;
-  padding: 10px 2px 11px;
+  padding: 10px 2px;
 }
 
 .pace-row + .pace-row {
@@ -436,6 +436,7 @@ body,
 .pace-footer small {
   flex: 0 1 auto;
   color: #727a85;
+  font-size: 12px;
   text-align: right;
 }
 
