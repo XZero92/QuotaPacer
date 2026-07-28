@@ -275,8 +275,10 @@ body,
 }
 
 .pace-freshness {
+  display: block;
   width: 7px;
   height: 7px;
+  flex: 0 0 7px;
   background: var(--color-actual);
   border-radius: 50%;
   box-shadow: 0 0 0 3px rgb(114 230 173 / 10%);
