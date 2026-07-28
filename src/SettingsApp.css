@@ -14,6 +14,7 @@ input {
 .settings-page {
   height: 100%;
   padding: 24px;
+  overflow-y: auto;
   color: #f3f5f7;
   background:
     radial-gradient(circle at top right, rgb(67 111 91 / 16%), transparent 34%),
@@ -85,7 +86,8 @@ input {
 .segmented button,
 .icon-button,
 .secondary-button,
-.primary-button {
+.primary-button,
+.danger-button {
   color: inherit;
   cursor: pointer;
   border: 0;
@@ -102,6 +104,11 @@ input {
   color: #f3f5f7;
   font-weight: 700;
   background: #343a43;
+}
+
+.segmented button:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .weekday-grid {
@@ -170,6 +177,54 @@ input {
   margin-bottom: 0;
 }
 
+.opacity-slider-control {
+  position: relative;
+  margin: 14px 0 2px;
+}
+
+.opacity-slider {
+  width: 100%;
+  margin: 0;
+  accent-color: #72e6ad;
+  cursor: pointer;
+}
+
+.opacity-slider:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.opacity-tooltip {
+  position: absolute;
+  z-index: 2;
+  bottom: calc(100% + 5px);
+  left: calc(var(--opacity-tooltip-position) + var(--opacity-tooltip-offset));
+  min-width: 42px;
+  padding: 4px 7px;
+  color: #0d1812;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+  background: #72e6ad;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 30%);
+  transform: translateX(-50%);
+}
+
+.opacity-tooltip::after {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  content: "";
+  border: 4px solid transparent;
+  border-top-color: #72e6ad;
+  transform: translateX(-50%);
+}
+
 .switch {
   position: relative;
   display: inline-flex;
@@ -224,7 +279,9 @@ input {
 }
 
 .switch input:focus-visible + span {
-  box-shadow: 0 0 0 2px #111318, 0 0 0 4px #72e6ad;
+  box-shadow:
+    0 0 0 2px #111318,
+    0 0 0 4px #72e6ad;
 }
 
 .switch input:disabled + span {
@@ -247,7 +304,8 @@ input {
 }
 
 .secondary-button,
-.primary-button {
+.primary-button,
+.danger-button {
   flex: 0 0 auto;
   padding: 8px 12px;
   font-size: 12px;
@@ -265,8 +323,14 @@ input {
   background: #72e6ad;
 }
 
+.danger-button {
+  color: #ff9da2;
+  background: rgb(255 107 114 / 10%);
+}
+
 .primary-button:disabled,
-.secondary-button:disabled {
+.secondary-button:disabled,
+.danger-button:disabled {
   cursor: default;
   opacity: 0.45;
 }
@@ -279,4 +343,42 @@ input {
 .settings-page > footer span {
   color: #aeb5be;
   font-size: 12px;
+}
+
+.confirm-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  padding: 24px;
+  place-items: center;
+  background: rgb(5 7 10 / 72%);
+  backdrop-filter: blur(4px);
+}
+
+.confirm-dialog {
+  width: min(100%, 420px);
+  padding: 20px;
+  background: #1a1d23;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
+}
+
+.confirm-dialog h2 {
+  margin-bottom: 8px;
+  font-size: 18px;
+}
+
+.confirm-dialog p {
+  margin-bottom: 18px;
+  color: #aeb5be;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }

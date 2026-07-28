@@ -37,10 +37,7 @@ export interface CliInfo {
 
 export type ForecastBasis = "recent" | "periodAverage" | "unavailable";
 export type PaceStatus =
-  | "safe"
-  | "planExceeded"
-  | "exhaustionRisk"
-  | "unavailable";
+  "safe" | "planExceeded" | "exhaustionRisk" | "unavailable";
 
 export interface PaceWindowView {
   windowId: string;
@@ -66,3 +63,24 @@ export interface PaceSettings {
   weekdayAllocations: number[];
   osNotificationsEnabled: boolean;
 }
+
+export interface EditableSettings {
+  paceSettings: PaceSettings;
+  overlayOpacity: number;
+}
+
+export interface SettingsSession {
+  sessionId: number;
+  settings: EditableSettings;
+}
+
+export type OverlayOpacityPhase = "preview" | "committed" | "reverted";
+
+export interface OverlayOpacityUpdate {
+  opacityPercent: number;
+  phase: OverlayOpacityPhase;
+  updateId: number;
+}
+
+export const MIN_OVERLAY_OPACITY = 40;
+export const DEFAULT_OVERLAY_OPACITY = 100;

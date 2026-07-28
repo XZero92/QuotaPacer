@@ -75,6 +75,12 @@ function mockStartup(
     if (command === "get_usage_state") return Promise.resolve(usage);
     if (command === "get_pace_state") return Promise.resolve(pace);
     if (command === "get_overlay_size") return Promise.resolve(size);
+    if (command === "get_effective_overlay_opacity")
+      return Promise.resolve({
+        opacityPercent: 100,
+        phase: "committed",
+        updateId: 0,
+      });
     return Promise.resolve();
   });
 }
@@ -479,6 +485,58 @@ describe("Codex 사용량 오버레이", () => {
     expect(
       await screen.findByLabelText("Codex · 주간 제한 74% 남음"),
     ).toBeInTheDocument();
+  });
+
+  it("최신 투명도 미리보기만 오버레이 전체에 반영한다", async () => {
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "get_usage_state") return Promise.resolve(weeklyOnly);
+      if (command === "get_pace_state") return Promise.resolve(weeklyPace);
+      if (command === "get_overlay_size") return Promise.resolve("middle");
+      if (command === "get_effective_overlay_opacity")
+        return Promise.resolve({
+          opacityPercent: 65,
+          phase: "committed",
+          updateId: 4,
+        });
+      return Promise.resolve();
+    });
+    render(<App />);
+    const overlay = await screen.findByTitle(
+      "드래그하여 이동 · 우클릭하여 메뉴 열기",
+    );
+
+    expect(overlay).toHaveStyle({ "--overlay-opacity": "0.65" });
+    mocks.listeners.get("ui://overlay-opacity-updated")?.({
+      payload: {
+        opacityPercent: 80,
+        phase: "preview",
+        updateId: 6,
+      },
+    });
+    await waitFor(() =>
+      expect(overlay).toHaveStyle({ "--overlay-opacity": "0.8" }),
+    );
+    expect(overlay).toHaveClass("is-opacity-previewing");
+
+    mocks.listeners.get("ui://overlay-opacity-updated")?.({
+      payload: {
+        opacityPercent: 40,
+        phase: "preview",
+        updateId: 5,
+      },
+    });
+    expect(overlay).toHaveStyle({ "--overlay-opacity": "0.8" });
+
+    mocks.listeners.get("ui://overlay-opacity-updated")?.({
+      payload: {
+        opacityPercent: 65,
+        phase: "reverted",
+        updateId: 7,
+      },
+    });
+    await waitFor(() =>
+      expect(overlay).not.toHaveClass("is-opacity-previewing"),
+    );
   });
 
   it("마지막 성공 값이 있으면 stale 상태를 지연 표시와 함께 유지한다", async () => {

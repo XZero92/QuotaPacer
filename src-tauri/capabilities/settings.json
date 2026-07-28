@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "settings",
-  "description": "Capability for the pace settings window",
+  "description": "Capability for the application settings window",
   "windows": ["settings"],
   "permissions": [
     "core:default",

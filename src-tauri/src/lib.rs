@@ -5,9 +5,13 @@ mod usage;
 
 use codex::{inspect_cli, CliInfo, UsageService};
 use pace::{PaceService, PaceViewState};
-use settings::{OverlaySize, PaceSettings, SettingsStore, StoredPosition};
+use serde::Serialize;
+use settings::{
+    validate_overlay_opacity, EditableSettings, OverlaySize, SettingsStore, StoredPosition,
+};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use tauri::menu::{
     CheckMenuItem, CheckMenuItemBuilder, Menu, MenuBuilder, MenuItemBuilder, Submenu,
     SubmenuBuilder,
@@ -23,7 +27,153 @@ struct AppState {
     usage: UsageService,
     pace: PaceService,
     settings: SettingsStore,
+    opacity_preview: Mutex<OpacityPreviewController>,
     exiting: AtomicBool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum OverlayOpacityPhase {
+    Preview,
+    Committed,
+    Reverted,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OverlayOpacityUpdate {
+    opacity_percent: u8,
+    phase: OverlayOpacityPhase,
+    update_id: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SettingsSession {
+    session_id: u64,
+    settings: EditableSettings,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ActiveOpacityPreview {
+    session_id: u64,
+    latest_revision: u64,
+    opacity_percent: u8,
+    has_preview: bool,
+}
+
+#[derive(Debug, Default)]
+struct OpacityPreviewController {
+    latest_session_id: u64,
+    latest_update_id: u64,
+    active: Option<ActiveOpacityPreview>,
+}
+
+impl OpacityPreviewController {
+    fn begin(&mut self, persisted_opacity: u8) -> (u64, Option<OverlayOpacityUpdate>) {
+        let should_revert = self
+            .active
+            .take()
+            .map(|active| active.has_preview)
+            .unwrap_or(false);
+        let reverted = should_revert
+            .then(|| self.next_update(persisted_opacity, OverlayOpacityPhase::Reverted));
+        let session_id = self.next_session_id();
+        self.active = Some(ActiveOpacityPreview {
+            session_id,
+            latest_revision: 0,
+            opacity_percent: persisted_opacity,
+            has_preview: false,
+        });
+        (session_id, reverted)
+    }
+
+    fn preview(
+        &mut self,
+        session_id: u64,
+        revision: u64,
+        opacity_percent: u8,
+    ) -> Option<OverlayOpacityUpdate> {
+        let accepted = self
+            .active
+            .as_mut()
+            .filter(|active| active.session_id == session_id && revision > active.latest_revision);
+        let active = accepted?;
+        active.latest_revision = revision;
+        active.opacity_percent = opacity_percent;
+        active.has_preview = true;
+        Some(self.next_update(opacity_percent, OverlayOpacityPhase::Preview))
+    }
+
+    fn cancel(&mut self, session_id: u64, persisted_opacity: u8) -> Option<OverlayOpacityUpdate> {
+        let active = self
+            .active
+            .filter(|active| active.session_id == session_id)?;
+        self.active = None;
+        active
+            .has_preview
+            .then(|| self.next_update(persisted_opacity, OverlayOpacityPhase::Reverted))
+    }
+
+    fn is_active(&self, session_id: u64) -> bool {
+        self.active
+            .map(|active| active.session_id == session_id)
+            .unwrap_or(false)
+    }
+
+    fn commit_and_restart(
+        &mut self,
+        session_id: u64,
+        opacity_percent: u8,
+    ) -> Option<(u64, OverlayOpacityUpdate)> {
+        if !self.is_active(session_id) {
+            return None;
+        }
+        self.active = None;
+        let update = self.next_update(opacity_percent, OverlayOpacityPhase::Committed);
+        let next_session_id = self.next_session_id();
+        self.active = Some(ActiveOpacityPreview {
+            session_id: next_session_id,
+            latest_revision: 0,
+            opacity_percent,
+            has_preview: false,
+        });
+        Some((next_session_id, update))
+    }
+
+    fn effective(&self, persisted_opacity: u8) -> OverlayOpacityUpdate {
+        if let Some(active) = self.active.filter(|active| active.has_preview) {
+            OverlayOpacityUpdate {
+                opacity_percent: active.opacity_percent,
+                phase: OverlayOpacityPhase::Preview,
+                update_id: self.latest_update_id,
+            }
+        } else {
+            OverlayOpacityUpdate {
+                opacity_percent: persisted_opacity,
+                phase: OverlayOpacityPhase::Committed,
+                update_id: self.latest_update_id,
+            }
+        }
+    }
+
+    fn next_session_id(&mut self) -> u64 {
+        self.latest_session_id = self.latest_session_id.wrapping_add(1).max(1);
+        self.latest_session_id
+    }
+
+    fn next_update(
+        &mut self,
+        opacity_percent: u8,
+        phase: OverlayOpacityPhase,
+    ) -> OverlayOpacityUpdate {
+        self.latest_update_id = self.latest_update_id.wrapping_add(1).max(1);
+        OverlayOpacityUpdate {
+            opacity_percent,
+            phase,
+            update_id: self.latest_update_id,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -66,21 +216,6 @@ fn get_pace_state(state: State<'_, AppState>) -> PaceViewState {
 }
 
 #[tauri::command]
-fn get_pace_settings(state: State<'_, AppState>) -> PaceSettings {
-    state.settings.pace_settings()
-}
-
-#[tauri::command]
-fn set_pace_settings(
-    pace_settings: PaceSettings,
-    state: State<'_, AppState>,
-) -> Result<PaceSettings, String> {
-    state.settings.set_pace_settings(pace_settings.clone())?;
-    state.pace.recompute(&state.usage.state());
-    Ok(pace_settings)
-}
-
-#[tauri::command]
 fn clear_pace_history(state: State<'_, AppState>) -> Result<(), String> {
     state.pace.clear_history(&state.usage.state())
 }
@@ -110,6 +245,106 @@ fn set_codex_executable(
 #[tauri::command]
 fn get_overlay_size(state: State<'_, AppState>) -> OverlaySize {
     state.settings.overlay_size()
+}
+
+#[tauri::command]
+fn begin_settings_session(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<SettingsSession, String> {
+    let settings = state.settings.editable_settings();
+    let (session_id, reverted) = state
+        .opacity_preview
+        .lock()
+        .map_err(|_| "투명도 미리보기 상태를 잠글 수 없습니다.".to_string())?
+        .begin(settings.overlay_opacity);
+    if let Some(update) = reverted {
+        emit_opacity_update(&app, update);
+    }
+    Ok(SettingsSession {
+        session_id,
+        settings,
+    })
+}
+
+#[tauri::command]
+fn preview_overlay_opacity(
+    session_id: u64,
+    revision: u64,
+    opacity_percent: u8,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<OverlayOpacityUpdate>, String> {
+    validate_overlay_opacity(opacity_percent)?;
+    let update = state
+        .opacity_preview
+        .lock()
+        .map_err(|_| "투명도 미리보기 상태를 잠글 수 없습니다.".to_string())?
+        .preview(session_id, revision, opacity_percent);
+    if let Some(update) = update {
+        emit_opacity_update(&app, update);
+    }
+    Ok(update)
+}
+
+#[tauri::command]
+fn save_editable_settings(
+    session_id: u64,
+    settings: EditableSettings,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<SettingsSession, String> {
+    let mut preview = state
+        .opacity_preview
+        .lock()
+        .map_err(|_| "투명도 미리보기 상태를 잠글 수 없습니다.".to_string())?;
+    if !preview.is_active(session_id) {
+        return Err("설정 세션이 만료되었습니다. 설정 창을 다시 열어주세요.".to_string());
+    }
+    let saved = state.settings.set_editable_settings(settings)?;
+    let (next_session_id, update) = preview
+        .commit_and_restart(session_id, saved.overlay_opacity)
+        .ok_or_else(|| "설정 세션이 만료되었습니다. 설정 창을 다시 열어주세요.".to_string())?;
+    drop(preview);
+    state.pace.recompute(&state.usage.state());
+    emit_opacity_update(&app, update);
+    Ok(SettingsSession {
+        session_id: next_session_id,
+        settings: saved,
+    })
+}
+
+#[tauri::command]
+fn cancel_settings_session(
+    session_id: u64,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let persisted_opacity = state.settings.overlay_opacity();
+    let update = state
+        .opacity_preview
+        .lock()
+        .map_err(|_| "투명도 미리보기 상태를 잠글 수 없습니다.".to_string())?
+        .cancel(session_id, persisted_opacity);
+    if let Some(update) = update {
+        emit_opacity_update(&app, update);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_effective_overlay_opacity(
+    state: State<'_, AppState>,
+) -> Result<OverlayOpacityUpdate, String> {
+    let preview = state
+        .opacity_preview
+        .lock()
+        .map_err(|_| "투명도 미리보기 상태를 잠글 수 없습니다.".to_string())?;
+    Ok(preview.effective(state.settings.overlay_opacity()))
+}
+
+fn emit_opacity_update(app: &tauri::AppHandle, update: OverlayOpacityUpdate) {
+    let _ = app.emit_to("main", "ui://overlay-opacity-updated", update);
 }
 
 #[tauri::command]
@@ -158,6 +393,7 @@ pub fn run() {
                 usage,
                 pace,
                 settings: settings.clone(),
+                opacity_preview: Mutex::new(OpacityPreviewController::default()),
                 exiting: AtomicBool::new(false),
             });
 
@@ -178,13 +414,16 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_usage_state,
             get_pace_state,
-            get_pace_settings,
-            set_pace_settings,
             clear_pace_history,
             show_pace_settings,
             refresh_usage,
             set_codex_executable,
             get_overlay_size,
+            begin_settings_session,
+            preview_overlay_opacity,
+            save_editable_settings,
+            cancel_settings_session,
+            get_effective_overlay_opacity,
             show_overlay_context_menu,
             set_overlay_layout
         ])
@@ -226,8 +465,7 @@ fn setup_menus(app: &mut tauri::App, selected: OverlaySize) -> tauri::Result<Ove
     let tray_refresh = MenuItemBuilder::with_id("tray-refresh", "새로고침").build(app)?;
     let tray_choose_cli =
         MenuItemBuilder::with_id("tray-choose-cli", "Codex CLI 경로 선택").build(app)?;
-    let tray_pace_settings =
-        MenuItemBuilder::with_id("tray-pace-settings", "페이스 설정").build(app)?;
+    let tray_pace_settings = MenuItemBuilder::with_id("tray-pace-settings", "설정").build(app)?;
     let tray_quit = MenuItemBuilder::with_id("tray-quit", "종료").build(app)?;
     let tray_menu = MenuBuilder::new(app)
         .items(&[
@@ -245,7 +483,7 @@ fn setup_menus(app: &mut tauri::App, selected: OverlaySize) -> tauri::Result<Ove
     let context_choose_cli =
         MenuItemBuilder::with_id("context-choose-cli", "Codex CLI 경로 선택").build(app)?;
     let context_pace_settings =
-        MenuItemBuilder::with_id("context-pace-settings", "페이스 설정").build(app)?;
+        MenuItemBuilder::with_id("context-pace-settings", "설정").build(app)?;
     let context_hide = MenuItemBuilder::with_id("context-hide", "숨기기").build(app)?;
     let context_quit = MenuItemBuilder::with_id("context-quit", "종료").build(app)?;
     let context = MenuBuilder::new(app)
@@ -457,11 +695,11 @@ fn install_window_handlers(window: &WebviewWindow) {
 }
 
 fn install_settings_window_handlers(window: &WebviewWindow) {
-    let window_for_event = window.clone();
+    let handle = window.app_handle().clone();
     window.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
-            let _ = window_for_event.hide();
+            let _ = handle.emit_to("settings", "ui://settings-close-requested", ());
         }
     });
 }
@@ -525,9 +763,13 @@ fn show_main_window(app: &tauri::AppHandle) {
 
 fn show_settings_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("settings") {
+        let was_visible = window.is_visible().unwrap_or(false);
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+        if !was_visible {
+            let _ = app.emit_to("settings", "ui://settings-opened", ());
+        }
     }
 }
 
@@ -535,6 +777,7 @@ fn show_settings_window(app: &tauri::AppHandle) {
 mod tests {
     use super::{
         anchored_position, is_pace_settings_menu_id, overlay_dimensions, overlay_size_from_menu_id,
+        OpacityPreviewController, OverlayOpacityPhase,
     };
     use crate::settings::OverlaySize;
     use tauri::{PhysicalPosition, PhysicalSize};
@@ -574,6 +817,47 @@ mod tests {
         assert!(is_pace_settings_menu_id("tray-pace-settings"));
         assert!(is_pace_settings_menu_id("context-pace-settings"));
         assert!(!is_pace_settings_menu_id("tray-refresh"));
+    }
+
+    #[test]
+    fn opacity_preview_rejects_stale_sessions_and_revisions() {
+        let mut controller = OpacityPreviewController::default();
+        let (first_session, _) = controller.begin(100);
+        let first = controller.preview(first_session, 1, 70).unwrap();
+        assert_eq!(first.phase, OverlayOpacityPhase::Preview);
+        assert_eq!(first.opacity_percent, 70);
+        assert!(controller.preview(first_session, 1, 60).is_none());
+
+        let (second_session, reverted) = controller.begin(100);
+        assert_eq!(reverted.unwrap().phase, OverlayOpacityPhase::Reverted);
+        assert!(controller.preview(first_session, 2, 50).is_none());
+        assert!(controller.preview(second_session, 1, 65).is_some());
+    }
+
+    #[test]
+    fn opacity_preview_commit_restarts_with_a_new_session() {
+        let mut controller = OpacityPreviewController::default();
+        let (session, _) = controller.begin(100);
+        let preview = controller.preview(session, 1, 65).unwrap();
+        let (next_session, committed) = controller.commit_and_restart(session, 65).unwrap();
+
+        assert!(next_session > session);
+        assert!(committed.update_id > preview.update_id);
+        assert_eq!(committed.phase, OverlayOpacityPhase::Committed);
+        assert_eq!(controller.effective(65).opacity_percent, 65);
+        assert!(controller.preview(session, 2, 50).is_none());
+    }
+
+    #[test]
+    fn opacity_preview_cancel_restores_the_persisted_value() {
+        let mut controller = OpacityPreviewController::default();
+        let (session, _) = controller.begin(100);
+        controller.preview(session, 1, 40).unwrap();
+        let reverted = controller.cancel(session, 100).unwrap();
+
+        assert_eq!(reverted.opacity_percent, 100);
+        assert_eq!(reverted.phase, OverlayOpacityPhase::Reverted);
+        assert_eq!(controller.effective(100).opacity_percent, 100);
     }
 
     #[test]

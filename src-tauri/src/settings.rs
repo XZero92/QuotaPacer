@@ -3,6 +3,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+pub const DEFAULT_OVERLAY_OPACITY: u8 = 100;
+pub const MIN_OVERLAY_OPACITY: u8 = 40;
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OverlaySize {
@@ -29,6 +32,20 @@ pub struct PaceSettings {
     pub weekday_allocations: [f64; 7],
     #[serde(default)]
     pub os_notifications_enabled: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditableSettings {
+    pub pace_settings: PaceSettings,
+    pub overlay_opacity: u8,
+}
+
+impl EditableSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        self.pace_settings.validate()?;
+        validate_overlay_opacity(self.overlay_opacity)
+    }
 }
 
 impl Default for PaceSettings {
@@ -74,15 +91,29 @@ impl OverlaySize {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub codex_executable: Option<String>,
     pub window_position: Option<StoredPosition>,
     #[serde(default)]
     pub overlay_size: OverlaySize,
+    #[serde(default = "default_overlay_opacity")]
+    pub overlay_opacity: u8,
     #[serde(default)]
     pub pace: PaceSettings,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            codex_executable: None,
+            window_position: None,
+            overlay_size: OverlaySize::default(),
+            overlay_opacity: DEFAULT_OVERLAY_OPACITY,
+            pace: PaceSettings::default(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -99,10 +130,11 @@ pub struct SettingsStore {
 
 impl SettingsStore {
     pub fn load(path: PathBuf) -> Self {
-        let value = fs::read_to_string(&path)
+        let mut value: AppSettings = fs::read_to_string(&path)
             .ok()
             .and_then(|contents| serde_json::from_str(&contents).ok())
             .unwrap_or_default();
+        value.overlay_opacity = normalize_overlay_opacity(value.overlay_opacity);
         Self {
             path,
             value: Arc::new(Mutex::new(value)),
@@ -157,21 +189,48 @@ impl SettingsStore {
         self.save_locked(&value)
     }
 
-    pub fn pace_settings(&self) -> PaceSettings {
+    pub fn overlay_opacity(&self) -> u8 {
         self.value
             .lock()
-            .map(|value| value.pace.clone())
-            .unwrap_or_default()
+            .map(|value| value.overlay_opacity)
+            .unwrap_or(DEFAULT_OVERLAY_OPACITY)
     }
 
-    pub fn set_pace_settings(&self, settings: PaceSettings) -> Result<(), String> {
+    pub fn editable_settings(&self) -> EditableSettings {
+        self.value
+            .lock()
+            .map(|value| EditableSettings {
+                pace_settings: value.pace.clone(),
+                overlay_opacity: value.overlay_opacity,
+            })
+            .unwrap_or_else(|_| EditableSettings {
+                pace_settings: PaceSettings::default(),
+                overlay_opacity: DEFAULT_OVERLAY_OPACITY,
+            })
+    }
+
+    pub fn set_editable_settings(
+        &self,
+        settings: EditableSettings,
+    ) -> Result<EditableSettings, String> {
         settings.validate()?;
         let mut value = self
             .value
             .lock()
             .map_err(|_| "설정을 잠글 수 없습니다.".to_string())?;
-        value.pace = settings;
-        self.save_locked(&value)
+        let mut next = value.clone();
+        next.pace = settings.pace_settings.clone();
+        next.overlay_opacity = settings.overlay_opacity;
+        self.save_locked(&next)?;
+        *value = next;
+        Ok(settings)
+    }
+
+    pub fn pace_settings(&self) -> PaceSettings {
+        self.value
+            .lock()
+            .map(|value| value.pace.clone())
+            .unwrap_or_default()
     }
 
     fn save_locked(&self, value: &AppSettings) -> Result<(), String> {
@@ -186,9 +245,33 @@ impl SettingsStore {
     }
 }
 
+const fn default_overlay_opacity() -> u8 {
+    DEFAULT_OVERLAY_OPACITY
+}
+
+fn normalize_overlay_opacity(opacity: u8) -> u8 {
+    opacity.clamp(MIN_OVERLAY_OPACITY, 100)
+}
+
+pub fn validate_overlay_opacity(opacity: u8) -> Result<(), String> {
+    if (MIN_OVERLAY_OPACITY..=100).contains(&opacity) {
+        Ok(())
+    } else {
+        Err(format!(
+            "오버레이 투명도는 {MIN_OVERLAY_OPACITY}~100% 사이여야 합니다."
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{AppSettings, OverlaySize, PacePlanMode, PaceSettings};
+    use super::{
+        normalize_overlay_opacity, validate_overlay_opacity, AppSettings, EditableSettings,
+        OverlaySize, PacePlanMode, PaceSettings, SettingsStore, DEFAULT_OVERLAY_OPACITY,
+        MIN_OVERLAY_OPACITY,
+    };
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn existing_settings_default_to_middle_overlay() {
@@ -197,9 +280,27 @@ mod tests {
                 .unwrap();
 
         assert_eq!(settings.overlay_size, OverlaySize::Middle);
+        assert_eq!(settings.overlay_opacity, DEFAULT_OVERLAY_OPACITY);
         assert_eq!(settings.codex_executable.as_deref(), Some("codex"));
         assert_eq!(settings.pace.plan_mode, PacePlanMode::Even);
         assert!(!settings.pace.os_notifications_enabled);
+    }
+
+    #[test]
+    fn overlay_opacity_uses_a_readable_percentage_range() {
+        let settings: AppSettings = serde_json::from_str(r#"{"overlayOpacity":65}"#).unwrap();
+
+        assert_eq!(settings.overlay_opacity, 65);
+        assert_eq!(MIN_OVERLAY_OPACITY, 40);
+        assert_eq!(normalize_overlay_opacity(0), MIN_OVERLAY_OPACITY);
+        assert_eq!(normalize_overlay_opacity(255), 100);
+        assert!(validate_overlay_opacity(40).is_ok());
+        assert!(validate_overlay_opacity(100).is_ok());
+        assert!(validate_overlay_opacity(39).is_err());
+        assert!(validate_overlay_opacity(101).is_err());
+        assert!(serde_json::to_string(&settings)
+            .unwrap()
+            .contains(r#""overlayOpacity":65"#));
     }
 
     #[test]
@@ -227,5 +328,74 @@ mod tests {
             ..invalid
         };
         assert!(valid.validate().is_ok());
+    }
+
+    #[test]
+    fn editable_settings_merge_without_overwriting_external_fields() {
+        let path = unique_test_path("editable-merge");
+        let original = AppSettings {
+            codex_executable: Some("custom-codex".to_string()),
+            window_position: Some(super::StoredPosition { x: 42, y: 84 }),
+            overlay_size: OverlaySize::Large,
+            ..AppSettings::default()
+        };
+        let store = SettingsStore {
+            path: path.clone(),
+            value: Arc::new(Mutex::new(original)),
+        };
+        let editable = EditableSettings {
+            pace_settings: PaceSettings {
+                os_notifications_enabled: true,
+                ..PaceSettings::default()
+            },
+            overlay_opacity: 65,
+        };
+
+        store.set_editable_settings(editable.clone()).unwrap();
+        let saved: AppSettings =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+
+        assert_eq!(store.editable_settings(), editable);
+        assert_eq!(saved.codex_executable.as_deref(), Some("custom-codex"));
+        assert_eq!(saved.window_position.unwrap().x, 42);
+        assert_eq!(saved.overlay_size, OverlaySize::Large);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn failed_editable_save_keeps_the_in_memory_settings() {
+        let original = AppSettings::default();
+        let store = SettingsStore {
+            path: std::env::temp_dir(),
+            value: Arc::new(Mutex::new(original)),
+        };
+        let changed = EditableSettings {
+            pace_settings: PaceSettings {
+                os_notifications_enabled: true,
+                ..PaceSettings::default()
+            },
+            overlay_opacity: 65,
+        };
+
+        assert!(store.set_editable_settings(changed).is_err());
+        assert_eq!(
+            store.editable_settings(),
+            EditableSettings {
+                pace_settings: PaceSettings::default(),
+                overlay_opacity: DEFAULT_OVERLAY_OPACITY,
+            }
+        );
+    }
+
+    fn unique_test_path(label: &str) -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "quota-pacer-{label}-{}-{}.json",
+            std::process::id(),
+            nonce
+        ))
     }
 }

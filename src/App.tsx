@@ -1,15 +1,25 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   CliInfo,
+  OverlayOpacityPhase,
+  OverlayOpacityUpdate,
   PaceViewState,
   PaceWindowView,
   UsageViewState,
   UsageWindow,
 } from "./types";
+import { DEFAULT_OVERLAY_OPACITY, MIN_OVERLAY_OPACITY } from "./types";
 import {
   featuredWindow,
   formatResetTime,
@@ -512,8 +522,28 @@ function App() {
   const [usage, setUsage] = useState<UsageViewState>(INITIAL_USAGE_STATE);
   const [pace, setPace] = useState<PaceViewState>(INITIAL_PACE_STATE);
   const [sizeMode, setSizeMode] = useState<OverlaySize>("middle");
+  const [opacity, setOpacity] = useState(DEFAULT_OVERLAY_OPACITY);
+  const [opacityPhase, setOpacityPhase] =
+    useState<OverlayOpacityPhase>("committed");
   const [sizeReady, setSizeReady] = useState(false);
   const draggingRef = useRef(false);
+  const lastOpacityUpdateIdRef = useRef(-1);
+
+  const applyOpacityUpdate = useCallback((update: OverlayOpacityUpdate) => {
+    if (
+      !Number.isInteger(update.updateId) ||
+      update.updateId <= lastOpacityUpdateIdRef.current ||
+      !Number.isInteger(update.opacityPercent) ||
+      update.opacityPercent < MIN_OVERLAY_OPACITY ||
+      update.opacityPercent > 100 ||
+      !["preview", "committed", "reverted"].includes(update.phase)
+    ) {
+      return;
+    }
+    lastOpacityUpdateIdRef.current = update.updateId;
+    setOpacity(update.opacityPercent);
+    setOpacityPhase(update.phase);
+  }, []);
 
   const startDragging = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
@@ -556,11 +586,14 @@ function App() {
   useEffect(() => {
     void invoke<UsageViewState>("get_usage_state").then(setUsage);
     void invoke<PaceViewState>("get_pace_state").then(setPace);
-    void invoke<OverlaySize>("get_overlay_size")
-      .then((size) => {
+    void Promise.all([
+      invoke<OverlaySize>("get_overlay_size").then((size) => {
         if (isOverlaySize(size)) setSizeMode(size);
-      })
-      .finally(() => setSizeReady(true));
+      }),
+      invoke<OverlayOpacityUpdate>("get_effective_overlay_opacity").then(
+        applyOpacityUpdate,
+      ),
+    ]).finally(() => setSizeReady(true));
     const unlistenUsage = listen<UsageViewState>(
       "usage://state-changed",
       (event) => setUsage(event.payload),
@@ -571,6 +604,10 @@ function App() {
         if (isOverlaySize(event.payload)) setSizeMode(event.payload);
       },
     );
+    const unlistenOverlayOpacity = listen<OverlayOpacityUpdate>(
+      "ui://overlay-opacity-updated",
+      (event) => applyOpacityUpdate(event.payload),
+    );
     const unlistenPace = listen<PaceViewState>(
       "pace://state-changed",
       (event) => setPace(event.payload),
@@ -579,10 +616,11 @@ function App() {
     return () => {
       void unlistenUsage.then((unlisten) => unlisten());
       void unlistenOverlaySize.then((unlisten) => unlisten());
+      void unlistenOverlayOpacity.then((unlisten) => unlisten());
       void unlistenPace.then((unlisten) => unlisten());
       void unlistenPickCli.then((unlisten) => unlisten());
     };
-  }, [chooseCli]);
+  }, [applyOpacityUpdate, chooseCli]);
 
   useEffect(() => {
     if (!sizeReady) return;
@@ -596,7 +634,14 @@ function App() {
 
   return (
     <main
-      className={`overlay size-${sizeMode} ${sizeReady ? "is-size-ready" : ""}`}
+      className={`overlay size-${sizeMode} ${
+        sizeReady ? "is-size-ready" : ""
+      } ${opacityPhase === "preview" ? "is-opacity-previewing" : ""}`}
+      style={
+        {
+          "--overlay-opacity": opacity / 100,
+        } as CSSProperties
+      }
       data-tauri-drag-region
       onPointerDown={startDragging}
       onContextMenu={showContextMenu}
