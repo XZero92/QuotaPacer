@@ -172,7 +172,7 @@ body,
 
 .middle-heading,
 .pace-heading,
-.pace-forecast,
+.pace-summary,
 .gauge-labels,
 .timeline-endpoints {
   display: flex;
@@ -270,8 +270,16 @@ body,
 }
 
 .pace-list-header small {
-  color: #858d98;
+  color: var(--color-secondary-text);
   font-size: 12px;
+}
+
+.pace-freshness {
+  width: 7px;
+  height: 7px;
+  background: var(--color-actual);
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px rgb(114 230 173 / 10%);
 }
 
 .pace-rows {
@@ -281,7 +289,7 @@ body,
 .pace-row {
   --status-tone: var(--color-actual);
   min-height: 176px;
-  padding: 8px 2px;
+  padding: 10px 2px;
 }
 
 .pace-row + .pace-row {
@@ -311,8 +319,7 @@ body,
 }
 
 .pace-heading strong,
-.pace-heading > span,
-.pace-forecast span {
+.pace-heading > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -330,30 +337,24 @@ body,
   font-variant-numeric: tabular-nums;
 }
 
-.pace-verdict {
-  display: block;
-  margin-top: 2px;
-  color: var(--status-tone);
-  font-size: 17px;
-  line-height: 20px;
-}
-
-.pace-forecast {
+.pace-summary {
   min-width: 0;
-  height: 20px;
+  min-height: 24px;
+  margin-top: 2px;
   gap: 8px;
-  color: var(--color-secondary-text);
-  font-size: 12px;
 }
 
-.pace-forecast span {
+.pace-summary strong {
   min-width: 0;
   overflow: hidden;
+  color: var(--status-tone);
+  font-size: 17px;
+  line-height: 22px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.pace-forecast i {
+.pace-summary i {
   flex: 0 0 auto;
   padding: 2px 6px;
   color: #b8bec7;
@@ -390,7 +391,7 @@ body,
 
 .gauge-labels {
   min-width: 0;
-  margin-top: 3px;
+  margin-top: 9px;
   color: var(--color-secondary-text);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -447,8 +448,7 @@ body,
 }
 
 .plan-detail {
-  height: 15px;
-  margin-top: 3px;
+  margin-top: 4px;
   overflow: hidden;
   color: var(--color-secondary-text);
   font-size: 12px;
@@ -463,7 +463,7 @@ body,
 }
 
 .forecast-timeline {
-  margin-top: 3px;
+  margin-top: 6px;
 }
 
 .timeline-endpoints {
@@ -473,18 +473,30 @@ body,
   line-height: 15px;
 }
 
-.timeline-endpoints span:last-child {
+.timeline-endpoints span {
   min-width: 0;
   overflow: hidden;
-  text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.timeline-endpoints span:first-child {
+  margin-right: 8px;
+}
+
+.timeline-endpoints span:last-child {
+  text-align: right;
+}
+
+.timeline-exhaustion-label {
+  color: var(--status-tone);
+  font-weight: 700;
 }
 
 .timeline-track {
   position: relative;
   height: 6px;
-  margin: 3px 2px 0;
+  margin: 4px 2px 0;
   background: linear-gradient(
       90deg,
       var(--color-secondary-text),
@@ -536,26 +548,6 @@ body,
 
 .timeline-marker.align-end i {
   transform: translateX(-100%);
-}
-
-.timeline-detail {
-  height: 15px;
-  margin-top: 10px;
-  overflow: hidden;
-  color: var(--color-secondary-text);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  line-height: 15px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.timeline-earlyRisk .timeline-detail {
-  color: var(--color-plan-warning);
-}
-
-.timeline-exhaustionRisk .timeline-detail {
-  color: var(--color-exhaustion-danger);
 }
 
 .timeline-unavailable .timeline-track {

@@ -208,24 +208,35 @@ describe("Codex 사용량 오버레이", () => {
       await screen.findByRole("region", { name: "Codex 페이스 예측" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Codex Pace")).toBeInTheDocument();
+    expect(screen.getByLabelText("최신 사용량")).toBeInTheDocument();
+    expect(screen.queryByText("최신 사용량")).not.toBeInTheDocument();
     expect(screen.queryByText(/^Codex$/)).not.toBeInTheDocument();
     expect(screen.getByText("권장보다 17%p 여유")).toBeInTheDocument();
     expect(screen.getByText("계획보다 18%p 초과")).toBeInTheDocument();
-    expect(screen.getByText("현재 페이스 유지 가능")).toBeInTheDocument();
-    expect(screen.getByText("초기화 전 소진 예상")).toBeInTheDocument();
+    expect(screen.getByText("초기화 시 52% 사용 예상")).toBeInTheDocument();
+    expect(screen.getByText("45분 일찍 소진")).toBeInTheDocument();
+    expect(screen.queryByText("초기화 전 소진 예상")).not.toBeInTheDocument();
     expect(screen.getByText("기간 평균")).toBeInTheDocument();
     expect(screen.getByText("최근 8.3시간")).toBeInTheDocument();
-    expect(screen.getAllByText("초기화 시 52% 사용 예상")).toHaveLength(2);
     expect(
       screen.getByLabelText("26% 사용, 현재 권장 43%, 권장보다 17%p 여유"),
     ).toBeInTheDocument();
     expect(
-      screen.getByLabelText(/소진 예상, 초기화보다 약 45분 빠름/),
+      screen.getByLabelText(/소진 예상.*초기화.*45분 일찍 소진/),
     ).toBeInTheDocument();
     expect(screen.getByText("사용 26%")).toBeInTheDocument();
     expect(screen.getByText("권장 43%")).toBeInTheDocument();
     expect(screen.getByText("주간")).toBeInTheDocument();
     expect(screen.getByText("5시간")).toBeInTheDocument();
+    const riskRow = screen.getByText("45분 일찍 소진").closest(".pace-row");
+    const timeline = riskRow?.querySelector(".forecast-timeline");
+    const gauge = riskRow?.querySelector(".pace-gauge");
+    expect(riskRow).not.toBeNull();
+    expect(timeline).not.toBeNull();
+    expect(gauge).not.toBeNull();
+    expect(Array.from(riskRow!.children).indexOf(timeline!)).toBeLessThan(
+      Array.from(riskRow!.children).indexOf(gauge!),
+    );
     await waitFor(() =>
       expect(mocks.invoke).toHaveBeenCalledWith("set_overlay_layout", {
         size: "large",
@@ -238,7 +249,7 @@ describe("Codex 사용량 오버레이", () => {
     mockStartup("large");
     render(<App />);
     expect(
-      await screen.findByText("현재 페이스 유지 가능"),
+      await screen.findByText("초기화 시 52% 사용 예상"),
     ).toBeInTheDocument();
 
     mocks.listeners.get("pace://state-changed")?.({
@@ -254,8 +265,8 @@ describe("Codex 사용량 오버레이", () => {
       },
     });
 
-    expect(await screen.findByText("계획보다 4%p 초과")).toBeInTheDocument();
-    expect(screen.getByText("현재 계획을 초과했습니다")).toBeInTheDocument();
+    expect(await screen.findByText("계획보다 4%p 빠름")).toBeInTheDocument();
+    expect(screen.queryByText("계획보다 4%p 초과")).not.toBeInTheDocument();
   });
 
   it("large는 계획 차이의 raw 1%p 경계를 적용하고 초과 구간만 강조한다", async () => {
@@ -279,10 +290,8 @@ describe("Codex 사용량 오버레이", () => {
     );
     const { container } = render(<App />);
 
-    expect(
-      await screen.findByText("현재 계획을 초과했습니다"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("계획보다 1%p 초과")).toBeInTheDocument();
+    expect(await screen.findByText("계획보다 1%p 빠름")).toBeInTheDocument();
+    expect(screen.queryByText("계획보다 1%p 초과")).not.toBeInTheDocument();
     const overrun = container.querySelector<HTMLElement>(".gauge-overrun");
     expect(overrun).toHaveStyle({ left: "42.9%" });
     expect(Number.parseFloat(overrun?.style.width ?? "")).toBeCloseTo(1.1);
@@ -301,7 +310,13 @@ describe("Codex 사용량 오버레이", () => {
       },
     });
 
-    expect(await screen.findByText("권장선 부근")).toBeInTheDocument();
+    expect(
+      await screen.findByText("초기화 시 52% 사용 예상"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("권장선 부근")).not.toBeInTheDocument();
+    expect(
+      screen.getByLabelText("44% 사용, 현재 권장 43%, 권장선 부근"),
+    ).toBeInTheDocument();
     expect(container.querySelector(".gauge-overrun")).not.toBeInTheDocument();
   });
 
@@ -322,10 +337,9 @@ describe("Codex 사용량 오버레이", () => {
     const { container } = render(<App />);
 
     expect(
-      await screen.findByText("초기 추정 · 소진 가능성 있음"),
+      await screen.findByText(/초기 추정 · 2일 7시간 일찍 소진 가능/),
     ).toBeInTheDocument();
     expect(container.querySelector(".status-earlyRisk")).toBeInTheDocument();
-    expect(screen.getByText(/초기 추정 · 초기화보다 약/)).toBeInTheDocument();
     expect(
       Number.parseFloat(
         container.querySelector<HTMLElement>(".timeline-marker")?.style.left ??
@@ -340,11 +354,11 @@ describe("Codex 사용량 오버레이", () => {
       },
     });
 
-    expect(await screen.findByText("초기화 전 소진 예상")).toBeInTheDocument();
+    expect(await screen.findByText("2일 7시간 일찍 소진")).toBeInTheDocument();
     expect(
       container.querySelector(".status-exhaustionRisk"),
     ).toBeInTheDocument();
-    expect(screen.getByText(/소진 · 초기화보다 약/)).toBeInTheDocument();
+    expect(screen.queryByText(/초기화보다 약/)).not.toBeInTheDocument();
   });
 
   it("large는 권장선 0%와 100%에서 marker를 카드 안쪽으로 정렬한다", async () => {
@@ -390,8 +404,11 @@ describe("Codex 사용량 오버레이", () => {
     const { container } = render(<App />);
 
     expect(await screen.findByText("예측 준비 중")).toBeInTheDocument();
-    expect(screen.getByText("권장선 계산 불가")).toBeInTheDocument();
-    expect(screen.getAllByText("사용 기록이 더 필요합니다")).toHaveLength(2);
+    expect(screen.getByText("권장 —")).toBeInTheDocument();
+    expect(screen.queryByText("권장선 계산 불가")).not.toBeInTheDocument();
+    expect(
+      screen.getByLabelText("사용 기록이 더 필요합니다"),
+    ).toBeInTheDocument();
     expect(container.querySelector(".gauge-marker")).not.toBeInTheDocument();
     expect(container.querySelector(".timeline-marker")).not.toBeInTheDocument();
   });
@@ -411,9 +428,9 @@ describe("Codex 사용량 오버레이", () => {
     const { container } = render(<App />);
 
     expect(
-      await screen.findByText("현재 페이스 유지 가능"),
+      await screen.findByText("초기화 시 100% 사용 예상"),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("초기화 시 100% 사용 예상")).toHaveLength(2);
+    expect(screen.getAllByText("초기화 시 100% 사용 예상")).toHaveLength(1);
     expect(container.querySelector(".timeline-marker")).not.toBeInTheDocument();
   });
 
@@ -439,9 +456,7 @@ describe("Codex 사용량 오버레이", () => {
     );
     render(<App />);
 
-    expect(
-      await screen.findByText("소진 · 초기화보다 약 1일 1시간 빠름"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("1일 1시간 일찍 소진")).toBeInTheDocument();
   });
 
   it("우클릭하면 네이티브 오버레이 메뉴를 요청한다", async () => {

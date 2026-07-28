@@ -207,46 +207,53 @@ function paceDisplayStatus(
   return "unavailable";
 }
 
-function paceVerdict(status: PaceDisplayStatus) {
+function paceSummaryLabel(
+  pace: PaceWindowView | undefined,
+  resetsAt: number | null,
+  status: PaceDisplayStatus,
+) {
+  const exhaustionAt = pace?.projectedExhaustionAt ?? null;
+  const leadDuration =
+    exhaustionAt !== null && resetsAt !== null && exhaustionAt < resetsAt
+      ? formatLeadDuration(resetsAt - exhaustionAt)
+      : null;
+
   switch (status) {
-    case "safe":
+    case "safe": {
+      if (exhaustionAt !== null && exhaustionAt === resetsAt) {
+        return "초기화 시 100% 사용 예상";
+      }
+      if (
+        pace?.projectedEndPercent !== null &&
+        pace?.projectedEndPercent !== undefined
+      ) {
+        return `초기화 시 ${Math.round(pace.projectedEndPercent)}% 사용 예상`;
+      }
       return "현재 페이스 유지 가능";
-    case "planExceeded":
-      return "현재 계획을 초과했습니다";
+    }
+    case "planExceeded": {
+      const delta = Math.round(Math.abs(pace?.planDeltaPercentPoints ?? 0));
+      return `계획보다 ${delta}%p 빠름`;
+    }
     case "earlyRisk":
-      return "초기 추정 · 소진 가능성 있음";
+      return leadDuration === null
+        ? "초기 추정 · 소진 가능성 있음"
+        : `초기 추정 · ${leadDuration} 일찍 소진 가능`;
     case "exhaustionRisk":
-      return "초기화 전 소진 예상";
+      return leadDuration === null
+        ? "초기화 전 소진 예상"
+        : `${leadDuration} 일찍 소진`;
     default:
       return "예측 준비 중";
   }
 }
 
 function forecastBasisLabel(pace: PaceWindowView | undefined) {
-  if (!pace || pace.forecastBasis === "unavailable") return "관측 대기";
+  if (!pace || pace.forecastBasis === "unavailable") return null;
   if (pace.forecastBasis === "recent") {
     return `최근 ${Math.round((pace.observedHours ?? 0) * 10) / 10}시간`;
   }
-  return pace.earlyEstimate ? "기간 평균 · 초기 추정" : "기간 평균";
-}
-
-function forecastLabel(
-  pace: PaceWindowView | undefined,
-  resetsAt: number | null,
-) {
-  if (!pace || pace.forecastBasis === "unavailable") {
-    return "사용 기록이 더 필요합니다";
-  }
-  if (pace.projectedExhaustionAt !== null) {
-    if (resetsAt !== null && pace.projectedExhaustionAt === resetsAt) {
-      return "초기화 시 100% 사용 예상";
-    }
-    return `${formatResetTime(pace.projectedExhaustionAt)} 소진 예상`;
-  }
-  if (pace.projectedEndPercent !== null) {
-    return `초기화 시 ${Math.round(pace.projectedEndPercent)}% 사용 예상`;
-  }
-  return "소진 시각을 계산할 수 없습니다";
+  return "기간 평균";
 }
 
 function planLabel(pace: PaceWindowView | undefined) {
@@ -256,6 +263,21 @@ function planLabel(pace: PaceWindowView | undefined) {
   if (rawDelta > 1) return `계획보다 ${delta}%p 초과`;
   if (rawDelta < -1) return `권장보다 ${delta}%p 여유`;
   return "권장선 부근";
+}
+
+function visiblePlanLabel(
+  pace: PaceWindowView | undefined,
+  status: PaceDisplayStatus,
+) {
+  if (
+    !pace ||
+    pace.planDeltaPercentPoints === null ||
+    status === "planExceeded" ||
+    Math.abs(pace.planDeltaPercentPoints) <= 1
+  ) {
+    return null;
+  }
+  return planLabel(pace);
 }
 
 function formatLeadDuration(seconds: number) {
@@ -315,31 +337,31 @@ function ForecastTimeline({
       ? 100
       : pace?.projectedEndPercent;
 
-  let detail = "사용 기록이 더 필요합니다";
-  let accessibleDetail = detail;
+  let accessibleDetail = "사용 기록이 더 필요합니다";
   if (isRisk) {
-    const riskLabel = status === "earlyRisk" ? "초기 추정" : "소진";
-    accessibleDetail = `초기화보다 약 ${formatLeadDuration(
+    accessibleDetail = `${formatLeadDuration(
       resetsAt - exhaustionAt,
-    )} 빠름`;
-    detail = `${riskLabel} · ${accessibleDetail}`;
+    )} 일찍 소진`;
   } else if (
     status !== "unavailable" &&
     projectedEndPercent !== null &&
     projectedEndPercent !== undefined
   ) {
-    detail = `초기화 시 ${Math.round(projectedEndPercent)}% 사용 예상`;
-    accessibleDetail = detail;
+    accessibleDetail = `초기화 시 ${Math.round(projectedEndPercent)}% 사용 예상`;
   }
 
   const timelineLabel = isRisk
-    ? `${formatResetTime(exhaustionAt)} 소진 예상, ${accessibleDetail}`
-    : detail;
+    ? `${formatResetTime(exhaustionAt)} 소진 예상, ${formatResetTime(
+        resetsAt,
+      )} 초기화, ${accessibleDetail}`
+    : accessibleDetail;
 
   return (
     <div className={`forecast-timeline timeline-${status}`}>
       <div className="timeline-endpoints" aria-hidden="true">
-        <span>현재</span>
+        <span className={isRisk ? "timeline-exhaustion-label" : ""}>
+          {isRisk ? `${formatResetTime(exhaustionAt)} 소진` : null}
+        </span>
         <span>
           {resetsAt === null
             ? "초기화 시각 미정"
@@ -356,7 +378,6 @@ function ForecastTimeline({
           </span>
         )}
       </div>
-      <div className="timeline-detail">{detail}</div>
     </div>
   );
 }
@@ -382,6 +403,8 @@ function PaceRow({
     usedPercent > plannedPercent;
   const overrunWidth =
     hasOverrun && plannedPercent !== null ? usedPercent - plannedPercent : 0;
+  const basisLabel = forecastBasisLabel(pace);
+  const planDetail = visiblePlanLabel(pace, status);
 
   return (
     <article className={`pace-row status-${status}`}>
@@ -389,16 +412,21 @@ function PaceRow({
         <strong className="window-label">{windowLabel(window)}</strong>
         <span className="pace-remaining">{window.remainingPercent}% 남음</span>
       </div>
-      <strong className="pace-verdict">{paceVerdict(status)}</strong>
-      <div className="pace-forecast">
-        <span>{forecastLabel(pace, window.resetsAt)}</span>
-        <i>{forecastBasisLabel(pace)}</i>
+      <div className="pace-summary">
+        <strong>{paceSummaryLabel(pace, window.resetsAt, status)}</strong>
+        {basisLabel !== null && <i>{basisLabel}</i>}
       </div>
+      <ForecastTimeline
+        pace={pace}
+        resetsAt={window.resetsAt}
+        updatedAt={updatedAt}
+        status={status}
+      />
       <div className="gauge-labels" aria-hidden="true">
         <span>사용 {Math.round(usedPercent)}%</span>
         <span>
           {plannedPercent === null
-            ? "권장 계산 불가"
+            ? "권장 —"
             : `권장 ${Math.round(plannedPercent)}%`}
         </span>
       </div>
@@ -429,15 +457,11 @@ function PaceRow({
           />
         )}
       </div>
-      <div className={`plan-detail ${hasOverrun ? "is-overrun" : ""}`}>
-        {planLabel(pace)}
-      </div>
-      <ForecastTimeline
-        pace={pace}
-        resetsAt={window.resetsAt}
-        updatedAt={updatedAt}
-        status={status}
-      />
+      {planDetail !== null && (
+        <div className={`plan-detail ${hasOverrun ? "is-overrun" : ""}`}>
+          {planDetail}
+        </div>
+      )}
     </article>
   );
 }
@@ -464,11 +488,11 @@ function LargeOverlay({
     >
       <header className="pace-list-header">
         <strong>Codex Pace</strong>
-        <small>
-          {usage.connection === "stale"
-            ? staleLabel(usage.lastSuccessfulAt)
-            : "최신 사용량"}
-        </small>
+        {usage.connection === "stale" ? (
+          <small>{staleLabel(usage.lastSuccessfulAt)}</small>
+        ) : (
+          <span className="pace-freshness" aria-label="최신 사용량" />
+        )}
       </header>
       <div className="pace-rows">
         {windows.map((window) => (
