@@ -49,6 +49,16 @@ function settingsEqual(left: EditableSettings, right: EditableSettings) {
   );
 }
 
+function weekdayAllocationsValid(allocations: number[]) {
+  return (
+    allocations.length === 7 &&
+    allocations.every(
+      (value) => Number.isFinite(value) && value >= 0 && value <= 100,
+    ) &&
+    Math.abs(allocations.reduce((sum, value) => sum + value, 0) - 100) <= 0.1
+  );
+}
+
 function SettingsApp() {
   const [persistedSettings, setPersistedSettings] = useState(
     DEFAULT_EDITABLE_SETTINGS,
@@ -80,10 +90,9 @@ function SettingsApp() {
       paceSettings.weekdayAllocations.reduce((sum, value) => sum + value, 0),
     [paceSettings.weekdayAllocations],
   );
-  const allocationValid =
-    paceSettings.weekdayAllocations.every(
-      (value) => Number.isFinite(value) && value >= 0 && value <= 100,
-    ) && Math.abs(total - 100) <= 0.1;
+  const allocationValid = weekdayAllocationsValid(
+    paceSettings.weekdayAllocations,
+  );
   const dirty = !settingsEqual(persistedSettings, draftSettings);
   const formBusy = saving || requestingPermission;
   const opacityTooltipPosition =
@@ -278,11 +287,28 @@ function SettingsApp() {
   }, [formBusy, pendingClose, requestClose]);
 
   const setPlanMode = (planMode: PacePlanMode) => {
+    const shouldRestoreAllocations = planMode === "even" && !allocationValid;
+    const persistedAllocations =
+      persistedSettings.paceSettings.weekdayAllocations;
+    const restoredAllocations = weekdayAllocationsValid(persistedAllocations)
+      ? persistedAllocations
+      : DEFAULT_PACE_SETTINGS.weekdayAllocations;
+
     setDraftSettings((current) => ({
       ...current,
-      paceSettings: { ...current.paceSettings, planMode },
+      paceSettings: {
+        ...current.paceSettings,
+        planMode,
+        weekdayAllocations: shouldRestoreAllocations
+          ? [...restoredAllocations]
+          : current.paceSettings.weekdayAllocations,
+      },
     }));
-    setMessage("");
+    setMessage(
+      shouldRestoreAllocations
+        ? "잘못된 요일별 배분 초안을 유효한 값으로 되돌렸습니다."
+        : "",
+    );
   };
 
   const setAllocation = (index: number, value: string) => {
@@ -413,168 +439,176 @@ function SettingsApp() {
         </button>
       </header>
 
-      <section>
-        <h2>주간 사용 계획</h2>
-        <p className="section-help">
-          정확히 7일인 제한 창의 현재 권장선을 정합니다.
-        </p>
-        <div className="segmented" role="radiogroup" aria-label="계획 모드">
-          <button
-            type="button"
-            role="radio"
-            aria-checked={paceSettings.planMode === "even"}
-            className={paceSettings.planMode === "even" ? "selected" : ""}
-            disabled={formBusy}
-            onClick={() => setPlanMode("even")}
-          >
-            균등 배분
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={paceSettings.planMode === "weekday"}
-            className={paceSettings.planMode === "weekday" ? "selected" : ""}
-            disabled={formBusy}
-            onClick={() => setPlanMode("weekday")}
-          >
-            요일별 배분
-          </button>
-        </div>
-        <div
-          className={`weekday-grid ${
-            paceSettings.planMode === "even" ? "is-disabled" : ""
-          }`}
-        >
-          {DAY_LABELS.map((label, index) => (
-            <label key={label}>
-              <span>{label}</span>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                step="0.1"
-                aria-label={`${label}요일 배분율`}
-                disabled={paceSettings.planMode === "even" || formBusy}
-                value={paceSettings.weekdayAllocations[index]}
-                onChange={(event) => setAllocation(index, event.target.value)}
-              />
-              <small>%</small>
-            </label>
-          ))}
-        </div>
-        <p
-          className={`allocation-total ${allocationValid ? "" : "is-error"}`}
-          role="status"
-        >
-          합계 {Number.isFinite(total) ? total.toFixed(1) : "—"}%
-          {!allocationValid && " · 100±0.1%로 맞춰주세요"}
-        </p>
-      </section>
-
-      <section>
-        <div className="setting-row opacity-setting">
-          <div>
-            <h2>오버레이 투명도</h2>
-            <p className="section-help">
-              낮을수록 배경이 더 많이 비칩니다. 최소 40%입니다.
-            </p>
-          </div>
-        </div>
-        <div
-          className="opacity-slider-control"
-          style={
-            {
-              "--opacity-tooltip-position": `${opacityTooltipPosition}%`,
-              "--opacity-tooltip-offset": `${opacityTooltipOffset}px`,
-            } as CSSProperties
-          }
-        >
-          <input
-            id="overlay-opacity"
-            className="opacity-slider"
-            type="range"
-            min={MIN_OVERLAY_OPACITY}
-            max="100"
-            step="5"
-            aria-label="오버레이 투명도"
-            aria-valuetext={`${opacity}% · 낮을수록 더 투명함`}
-            disabled={formBusy || sessionId === null}
-            value={opacity}
-            onPointerDown={() => {
-              opacityPointerActiveRef.current = true;
-              showOpacityTooltip(false);
-            }}
-            onPointerUp={hideOpacityTooltip}
-            onPointerCancel={hideOpacityTooltip}
-            onBlur={hideOpacityTooltip}
-            onChange={(event) => {
-              showOpacityTooltip(!opacityPointerActiveRef.current);
-              setOpacity(Number(event.target.value));
-            }}
-          />
-          {opacityTooltipVisible && (
-            <output
-              className="opacity-tooltip"
-              htmlFor="overlay-opacity"
-              aria-hidden="true"
-              data-testid="opacity-tooltip"
-            >
-              {opacity}%
-            </output>
-          )}
-        </div>
-      </section>
-
-      <section>
-        <div className="setting-row">
-          <div>
-            <h2>OS 경고 알림</h2>
-            <p className="section-help">
-              계획 초과나 초기화 전 소진 위험을 창 세대별로 한 번 알립니다.
-            </p>
-          </div>
-          <label className="switch">
-            <input
-              type="checkbox"
-              aria-label="OS 경고 알림 사용"
-              checked={paceSettings.osNotificationsEnabled}
+      <div className="settings-content">
+        <section>
+          <h2>주간 사용 계획</h2>
+          <p className="section-help">
+            정확히 7일인 제한 창의 현재 권장선을 정합니다.
+          </p>
+          <div className="segmented" role="radiogroup" aria-label="계획 모드">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={paceSettings.planMode === "even"}
+              className={paceSettings.planMode === "even" ? "selected" : ""}
               disabled={formBusy}
-              onChange={(event) =>
-                void toggleNotifications(event.target.checked)
-              }
-            />
-            <span />
-          </label>
-        </div>
-        <p className="permission-state">
-          권한:{" "}
-          {permission === "checking"
-            ? "확인 중"
-            : permission === "granted"
-              ? "허용됨"
-              : "허용되지 않음"}
-        </p>
-      </section>
-
-      <section>
-        <div className="setting-row">
-          <div>
-            <h2>최근 이력</h2>
-            <p className="section-help">
-              사용률·시각·창 식별자만 최대 25시간 보존하며 계정 정보는 저장하지
-              않습니다.
-            </p>
+              onClick={() => setPlanMode("even")}
+            >
+              균등 배분
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={paceSettings.planMode === "weekday"}
+              className={paceSettings.planMode === "weekday" ? "selected" : ""}
+              disabled={formBusy}
+              onClick={() => setPlanMode("weekday")}
+            >
+              요일별 배분
+            </button>
           </div>
-          <button
-            className="secondary-button"
-            type="button"
-            disabled={clearingHistory || saving}
-            onClick={() => void clearHistory()}
+          {paceSettings.planMode === "even" ? (
+            <p className="even-plan-summary">월~일 동일 배분 · 하루 약 14.3%</p>
+          ) : (
+            <>
+              <div className="weekday-grid">
+                {DAY_LABELS.map((label, index) => (
+                  <label key={label}>
+                    <span>{label}</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      aria-label={`${label}요일 배분율`}
+                      disabled={formBusy}
+                      value={paceSettings.weekdayAllocations[index]}
+                      onChange={(event) =>
+                        setAllocation(index, event.target.value)
+                      }
+                    />
+                    <small>%</small>
+                  </label>
+                ))}
+              </div>
+              <p
+                className={`allocation-total ${
+                  allocationValid ? "" : "is-error"
+                }`}
+                role="status"
+              >
+                합계 {Number.isFinite(total) ? total.toFixed(1) : "—"}%
+                {!allocationValid && " · 100±0.1%로 맞춰주세요"}
+              </p>
+            </>
+          )}
+        </section>
+
+        <section>
+          <div className="setting-row opacity-setting">
+            <div>
+              <h2>오버레이 투명도</h2>
+              <p className="section-help">
+                낮을수록 배경이 더 많이 비칩니다. 최소 40%입니다.
+              </p>
+            </div>
+          </div>
+          <div
+            className="opacity-slider-control"
+            style={
+              {
+                "--opacity-tooltip-position": `${opacityTooltipPosition}%`,
+                "--opacity-tooltip-offset": `${opacityTooltipOffset}px`,
+              } as CSSProperties
+            }
           >
-            이력 삭제
-          </button>
-        </div>
-      </section>
+            <input
+              id="overlay-opacity"
+              className="opacity-slider"
+              type="range"
+              min={MIN_OVERLAY_OPACITY}
+              max="100"
+              step="5"
+              aria-label="오버레이 투명도"
+              aria-valuetext={`${opacity}% · 낮을수록 더 투명함`}
+              disabled={formBusy || sessionId === null}
+              value={opacity}
+              onPointerDown={() => {
+                opacityPointerActiveRef.current = true;
+                showOpacityTooltip(false);
+              }}
+              onPointerUp={hideOpacityTooltip}
+              onPointerCancel={hideOpacityTooltip}
+              onBlur={hideOpacityTooltip}
+              onChange={(event) => {
+                showOpacityTooltip(!opacityPointerActiveRef.current);
+                setOpacity(Number(event.target.value));
+              }}
+            />
+            {opacityTooltipVisible && (
+              <output
+                className="opacity-tooltip"
+                htmlFor="overlay-opacity"
+                aria-hidden="true"
+                data-testid="opacity-tooltip"
+              >
+                {opacity}%
+              </output>
+            )}
+          </div>
+        </section>
+
+        <section>
+          <div className="setting-row">
+            <div>
+              <h2>OS 경고 알림</h2>
+              <p className="section-help">
+                계획 초과나 초기화 전 소진 위험을 창 세대별로 한 번 알립니다.
+              </p>
+            </div>
+            <label className="switch">
+              <input
+                type="checkbox"
+                aria-label="OS 경고 알림 사용"
+                checked={paceSettings.osNotificationsEnabled}
+                disabled={formBusy}
+                onChange={(event) =>
+                  void toggleNotifications(event.target.checked)
+                }
+              />
+              <span />
+            </label>
+          </div>
+          <p className="permission-state">
+            권한:{" "}
+            {permission === "checking"
+              ? "확인 중"
+              : permission === "granted"
+                ? "허용됨"
+                : "허용되지 않음"}
+          </p>
+        </section>
+
+        <section>
+          <div className="setting-row">
+            <div>
+              <h2>최근 이력</h2>
+              <p className="section-help">
+                사용률·시각·창 식별자만 최대 25시간 보존하며 계정 정보는
+                저장하지 않습니다.
+              </p>
+            </div>
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={clearingHistory || saving}
+              onClick={() => void clearHistory()}
+            >
+              이력 삭제
+            </button>
+          </div>
+        </section>
+      </div>
 
       <footer>
         <span role="status">{message}</span>

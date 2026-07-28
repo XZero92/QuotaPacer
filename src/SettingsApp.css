@@ -12,9 +12,12 @@ input {
 }
 
 .settings-page {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
   height: 100%;
   padding: 24px;
-  overflow-y: auto;
+  overflow: hidden;
   color: #f3f5f7;
   background:
     radial-gradient(circle at top right, rgb(67 111 91 / 16%), transparent 34%),
@@ -30,7 +33,7 @@ input {
 }
 
 .settings-page > header {
-  margin-bottom: 18px;
+  margin-bottom: 6px;
   cursor: move;
 }
 
@@ -59,12 +62,22 @@ input {
   font-size: 15px;
 }
 
-.settings-page section {
+.settings-content {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.settings-content > section {
   margin-bottom: 12px;
   padding: 16px;
   background: rgb(255 255 255 / 4%);
   border: 1px solid rgb(255 255 255 / 9%);
   border-radius: 14px;
+}
+
+.settings-content > section:last-child {
+  margin-bottom: 0;
 }
 
 .section-help,
@@ -147,16 +160,14 @@ input {
   pointer-events: none;
 }
 
-.weekday-grid.is-disabled {
-  opacity: 0.45;
-}
-
 .allocation-total,
+.even-plan-summary,
 .permission-state {
   margin: 9px 0 0;
 }
 
-.allocation-total {
+.allocation-total,
+.even-plan-summary {
   color: #72e6ad;
   font-size: 12px;
 }

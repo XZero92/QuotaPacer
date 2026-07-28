@@ -82,6 +82,89 @@ describe("설정 창", () => {
     );
   });
 
+  it("균등 배분에서는 요약만 표시하고 요일 입력은 필요할 때만 렌더링한다", async () => {
+    await renderLoadedSettings();
+
+    expect(
+      screen.getByText("월~일 동일 배분 · 하루 약 14.3%"),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("월요일 배분율")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^합계 /)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "요일별 배분" }));
+
+    expect(
+      screen.queryByText("월~일 동일 배분 · 하루 약 14.3%"),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByRole("spinbutton")).toHaveLength(7);
+    expect(screen.getByText("합계 100.0%")).toBeInTheDocument();
+  });
+
+  it("유효한 요일별 배분은 균등 모드를 거쳐도 보존한다", async () => {
+    await renderLoadedSettings();
+    fireEvent.click(screen.getByRole("radio", { name: "요일별 배분" }));
+    fireEvent.change(screen.getByLabelText("월요일 배분율"), {
+      target: { value: "20" },
+    });
+    fireEvent.change(screen.getByLabelText("화요일 배분율"), {
+      target: { value: "8.6" },
+    });
+
+    fireEvent.click(screen.getByRole("radio", { name: "균등 배분" }));
+    expect(screen.queryByLabelText("월요일 배분율")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "요일별 배분" }));
+
+    expect(screen.getByLabelText("월요일 배분율")).toHaveValue(20);
+    expect(screen.getByLabelText("화요일 배분율")).toHaveValue(8.6);
+    expect(screen.getByText("합계 100.0%")).toBeInTheDocument();
+  });
+
+  it("잘못된 요일별 초안은 균등 모드 전환 시 저장값으로 복원한다", async () => {
+    await renderLoadedSettings();
+    fireEvent.click(screen.getByRole("radio", { name: "요일별 배분" }));
+    fireEvent.change(screen.getByLabelText("월요일 배분율"), {
+      target: { value: "30" },
+    });
+
+    fireEvent.click(screen.getByRole("radio", { name: "균등 배분" }));
+
+    expect(
+      screen.getByText("잘못된 요일별 배분 초안을 유효한 값으로 되돌렸습니다."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("radio", { name: "요일별 배분" }));
+    expect(screen.getByLabelText("월요일 배분율")).toHaveValue(14.3);
+    expect(screen.getByText("합계 100.0%")).toBeInTheDocument();
+  });
+
+  it("저장된 요일값도 잘못된 경우 기본 균등값으로 복원한다", async () => {
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "begin_settings_session") {
+        return Promise.resolve({
+          sessionId: 1,
+          settings: {
+            ...savedSettings,
+            paceSettings: {
+              ...savedSettings.paceSettings,
+              weekdayAllocations: [10, 10, 10, 10, 10, 10, 10],
+            },
+          },
+        });
+      }
+      return Promise.resolve();
+    });
+    await renderLoadedSettings();
+    fireEvent.click(screen.getByRole("radio", { name: "요일별 배분" }));
+
+    fireEvent.click(screen.getByRole("radio", { name: "균등 배분" }));
+    fireEvent.click(screen.getByRole("radio", { name: "요일별 배분" }));
+
+    expect(screen.getByLabelText("월요일 배분율")).toHaveValue(14.3);
+    expect(screen.getByLabelText("일요일 배분율")).toHaveValue(14.2);
+    expect(screen.getByText("합계 100.0%")).toBeInTheDocument();
+  });
+
   it("잘못된 요일 배분은 저장만 막고 투명도 미리보기는 허용한다", async () => {
     const slider = await renderLoadedSettings();
     fireEvent.click(screen.getByRole("radio", { name: "요일별 배분" }));
