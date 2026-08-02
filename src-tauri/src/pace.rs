@@ -37,6 +37,29 @@ pub enum PaceStatus {
     Unavailable,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PacePlanBreakdownKind {
+    Weekly,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PacePlanSegmentView {
+    pub starts_at: i64,
+    pub ends_at: i64,
+    pub allocation_percent: f64,
+    pub cumulative_percent: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PacePlanBreakdownView {
+    pub kind: PacePlanBreakdownKind,
+    pub current_segment_index: usize,
+    pub segments: Vec<PacePlanSegmentView>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaceWindowView {
@@ -47,6 +70,7 @@ pub struct PaceWindowView {
     pub projected_end_percent: Option<f64>,
     pub planned_used_percent: Option<f64>,
     pub plan_delta_percent_points: Option<f64>,
+    pub plan_breakdown: Option<PacePlanBreakdownView>,
     pub status: PaceStatus,
     pub early_estimate: bool,
 }
@@ -291,6 +315,7 @@ fn calculate_window(
 ) -> PaceWindowView {
     let used_percent = f64::from(window.used_percent.clamp(0, 100));
     let plan = planned_used_percent(window, as_of, settings, start_weekday_override);
+    let plan_breakdown = weekly_plan_breakdown(window, as_of, settings, start_weekday_override);
     let forecast = recent_forecast(window, as_of, used_percent, samples)
         .or_else(|| period_average_forecast(window, as_of, used_percent));
     let plan_delta = plan.map(|planned| used_percent - planned);
@@ -328,6 +353,7 @@ fn calculate_window(
             .map(|forecast| forecast.projected_end_percent),
         planned_used_percent: plan,
         plan_delta_percent_points: plan_delta,
+        plan_breakdown,
         status,
         early_estimate: forecast
             .as_ref()
@@ -461,16 +487,58 @@ fn planned_used_percent(
     }
 
     let segment = ((as_of - starts_at) / DAY_SECONDS).clamp(0, 6) as usize;
-    if settings.plan_mode == PacePlanMode::Even {
-        return Some(((segment + 1) as f64 * (100.0 / 7.0)).min(100.0));
-    }
     let start_weekday = start_weekday_override.unwrap_or_else(|| local_weekday_index(starts_at));
+    let allocations = weekly_allocations(settings, start_weekday);
     Some(
-        (0..=segment)
-            .map(|offset| settings.weekday_allocations[(start_weekday + offset) % 7])
+        allocations[..=segment]
+            .iter()
             .sum::<f64>()
             .clamp(0.0, 100.0),
     )
+}
+
+fn weekly_plan_breakdown(
+    window: &UsageWindow,
+    as_of: i64,
+    settings: &PaceSettings,
+    start_weekday_override: Option<usize>,
+) -> Option<PacePlanBreakdownView> {
+    let duration_minutes = window.window_duration_mins?;
+    if duration_minutes != WEEK_MINUTES {
+        return None;
+    }
+    let resets_at = window.resets_at?;
+    let starts_at = resets_at - duration_minutes.checked_mul(60)?;
+    let start_weekday = start_weekday_override.unwrap_or_else(|| local_weekday_index(starts_at));
+    let allocations = weekly_allocations(settings, start_weekday);
+    let current_segment_index = ((as_of - starts_at) / DAY_SECONDS).clamp(0, 6) as usize;
+    let mut cumulative = 0.0;
+    let segments = allocations
+        .into_iter()
+        .enumerate()
+        .map(|(index, allocation_percent)| {
+            cumulative = (cumulative + allocation_percent).min(100.0);
+            let segment_starts_at = starts_at + index as i64 * DAY_SECONDS;
+            PacePlanSegmentView {
+                starts_at: segment_starts_at,
+                ends_at: segment_starts_at + DAY_SECONDS,
+                allocation_percent,
+                cumulative_percent: cumulative,
+            }
+        })
+        .collect();
+    Some(PacePlanBreakdownView {
+        kind: PacePlanBreakdownKind::Weekly,
+        current_segment_index,
+        segments,
+    })
+}
+
+fn weekly_allocations(settings: &PaceSettings, start_weekday: usize) -> [f64; 7] {
+    if settings.plan_mode == PacePlanMode::Even {
+        return [100.0 / 7.0; 7];
+    }
+    std::array::from_fn(|offset| settings.weekday_allocations[(start_weekday + offset) % 7])
 }
 
 fn local_weekday_index(timestamp: i64) -> usize {
@@ -834,6 +902,35 @@ mod tests {
         let third = planned_used_percent(&window, 2 * DAY_SECONDS, &settings, Some(0)).unwrap();
         assert!((first - 100.0 / 7.0).abs() < 0.001);
         assert!((third - 300.0 / 7.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn weekly_plan_exposes_reset_aligned_segments_for_visualization() {
+        let resets_at = 7 * DAY_SECONDS;
+        let window = weekly_window(0, resets_at);
+        let pace = calculate_window(
+            &window,
+            2 * DAY_SECONDS,
+            &PaceSettings::default(),
+            &[],
+            Some(0),
+        );
+        let breakdown = pace.plan_breakdown.unwrap();
+
+        assert_eq!(breakdown.kind, PacePlanBreakdownKind::Weekly);
+        assert_eq!(breakdown.current_segment_index, 2);
+        assert_eq!(breakdown.segments.len(), 7);
+        assert_eq!(breakdown.segments[0].starts_at, 0);
+        assert_eq!(breakdown.segments[0].ends_at, DAY_SECONDS);
+        assert!((breakdown.segments[2].cumulative_percent - 300.0 / 7.0).abs() < 0.001);
+
+        let short_window = UsageWindow {
+            window_duration_mins: Some(300),
+            resets_at: Some(300 * 60),
+            ..weekly_window(0, 300 * 60)
+        };
+        let short_pace = calculate_window(&short_window, 0, &PaceSettings::default(), &[], None);
+        assert!(short_pace.plan_breakdown.is_none());
     }
 
     #[test]

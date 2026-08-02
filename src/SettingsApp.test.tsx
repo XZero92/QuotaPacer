@@ -36,6 +36,7 @@ const savedSettings: EditableSettings = {
     osNotificationsEnabled: false,
   },
   overlayOpacity: 100,
+  largePlanVisualization: "deviation",
 };
 
 async function renderLoadedSettings() {
@@ -98,6 +99,24 @@ describe("설정 창", () => {
     ).not.toBeInTheDocument();
     expect(screen.getAllByRole("spinbutton")).toHaveLength(7);
     expect(screen.getByText("합계 100.0%")).toBeInTheDocument();
+  });
+
+  it("Large 모드의 7일 계획 표시 방식을 선택하고 저장한다", async () => {
+    await renderLoadedSettings();
+
+    expect(screen.getByRole("radio", { name: /페이스 편차/ })).toBeChecked();
+    fireEvent.click(screen.getByRole("radio", { name: /주간 배분/ }));
+    expect(screen.getByRole("radio", { name: /주간 배분/ })).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: "저장" }));
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith("save_editable_settings", {
+        sessionId: 1,
+        settings: expect.objectContaining({
+          largePlanVisualization: "weeklyAllocation",
+        }),
+      }),
+    );
   });
 
   it("유효한 요일별 배분은 균등 모드를 거쳐도 보존한다", async () => {

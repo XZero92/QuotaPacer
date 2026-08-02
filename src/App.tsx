@@ -12,8 +12,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   CliInfo,
+  LargePlanVisualization,
   OverlayOpacityPhase,
   OverlayOpacityUpdate,
+  PacePlanBreakdownView,
   PaceViewState,
   PaceWindowView,
   UsageViewState,
@@ -33,9 +35,16 @@ import "./App.css";
 
 type OverlaySize = "small" | "middle" | "large";
 const INITIAL_PACE_STATE: PaceViewState = { windows: [], updatedAt: null };
+const PLAN_DEVIATION_RANGE = 20;
 
 function isOverlaySize(value: unknown): value is OverlaySize {
   return value === "small" || value === "middle" || value === "large";
+}
+
+function isLargePlanVisualization(
+  value: unknown,
+): value is LargePlanVisualization {
+  return value === "deviation" || value === "weeklyAllocation";
 }
 
 function errorTitle(connection: UsageViewState["connection"]) {
@@ -266,30 +275,6 @@ function forecastBasisLabel(pace: PaceWindowView | undefined) {
   return "기간 평균";
 }
 
-function planLabel(pace: PaceWindowView | undefined) {
-  if (!pace || pace.planDeltaPercentPoints === null) return "권장선 계산 불가";
-  const rawDelta = pace.planDeltaPercentPoints;
-  const delta = Math.round(Math.abs(rawDelta));
-  if (rawDelta > 1) return `계획보다 ${delta}%p 초과`;
-  if (rawDelta < -1) return `권장보다 ${delta}%p 여유`;
-  return "권장선 부근";
-}
-
-function visiblePlanLabel(
-  pace: PaceWindowView | undefined,
-  status: PaceDisplayStatus,
-) {
-  if (
-    !pace ||
-    pace.planDeltaPercentPoints === null ||
-    status === "planExceeded" ||
-    Math.abs(pace.planDeltaPercentPoints) <= 1
-  ) {
-    return null;
-  }
-  return planLabel(pace);
-}
-
 function formatLeadDuration(seconds: number) {
   const totalMinutes = Math.max(0, Math.ceil(seconds / 60));
   const days = Math.floor(totalMinutes / (24 * 60));
@@ -312,6 +297,388 @@ function markerAlignment(percent: number) {
   if (percent <= 8) return "start";
   if (percent >= 92) return "end";
   return "center";
+}
+
+type PlanColorStage = "reserve" | "near" | "borrow1" | "borrow2" | "borrow3";
+
+function formatPlanDifference(delta: number) {
+  const rounded = Math.round(Math.abs(delta));
+  if (delta > 1) return `계획보다 ${rounded}%p 초과`;
+  if (delta < -1) return `계획상 ${rounded}%p 여유`;
+  return "계획 범위";
+}
+
+function planColorStage(
+  delta: number,
+  breakdown: PacePlanBreakdownView | null | undefined,
+): PlanColorStage {
+  if (delta < -1) return "reserve";
+  if (delta <= 1) return "near";
+  if (!breakdown) return "borrow1";
+
+  let remaining = delta;
+  let borrowedSegments = 0;
+  for (
+    let index = breakdown.currentSegmentIndex + 1;
+    index < breakdown.segments.length;
+    index += 1
+  ) {
+    const allocation = breakdown.segments[index].allocationPercent;
+    if (allocation <= 0) continue;
+    borrowedSegments += 1;
+    if (remaining <= allocation) break;
+    remaining -= allocation;
+  }
+  if (borrowedSegments <= 1) return "borrow1";
+  if (borrowedSegments === 2) return "borrow2";
+  return "borrow3";
+}
+
+function planColorStageLabel(stage: PlanColorStage) {
+  switch (stage) {
+    case "reserve":
+      return "계획상 여유";
+    case "near":
+      return "계획 범위";
+    case "borrow1":
+      return "다음 계획 구간 사용";
+    case "borrow2":
+      return "두 번째 미래 구간 사용";
+    case "borrow3":
+      return "세 번째 이상 미래 구간 사용";
+  }
+}
+
+function deviationStageBands(
+  breakdown: PacePlanBreakdownView | null | undefined,
+) {
+  if (!breakdown) return [];
+  const bands: Array<{
+    left: number;
+    width: number;
+    stage: "borrow1" | "borrow2" | "borrow3";
+    reachesTrackEnd: boolean;
+  }> = [];
+  let cumulative = 0;
+  let borrowedSegments = 0;
+
+  for (
+    let index = breakdown.currentSegmentIndex + 1;
+    index < breakdown.segments.length && cumulative < PLAN_DEVIATION_RANGE;
+    index += 1
+  ) {
+    const allocation = breakdown.segments[index].allocationPercent;
+    if (allocation <= 0) continue;
+    borrowedSegments += 1;
+    const start = borrowedSegments === 1 ? 1 : cumulative;
+    cumulative += allocation;
+    const end = Math.min(cumulative, PLAN_DEVIATION_RANGE);
+    if (end <= start) continue;
+    bands.push({
+      left: 50 + (start / PLAN_DEVIATION_RANGE) * 50,
+      width: ((end - start) / PLAN_DEVIATION_RANGE) * 50,
+      stage:
+        borrowedSegments === 1
+          ? "borrow1"
+          : borrowedSegments === 2
+            ? "borrow2"
+            : "borrow3",
+      reachesTrackEnd: end === PLAN_DEVIATION_RANGE,
+    });
+  }
+  return bands;
+}
+
+function allocationOverrunPieces(
+  usedPercent: number,
+  plannedUsedPercent: number,
+  breakdown: PacePlanBreakdownView,
+) {
+  const pieces: Array<{
+    left: number;
+    width: number;
+    stage: "borrow1" | "borrow2" | "borrow3";
+  }> = [];
+  let left = plannedUsedPercent;
+  let remaining = Math.max(0, usedPercent - plannedUsedPercent);
+  let borrowedSegments = 0;
+
+  for (
+    let index = breakdown.currentSegmentIndex + 1;
+    index < breakdown.segments.length && remaining > 0;
+    index += 1
+  ) {
+    const allocation = breakdown.segments[index].allocationPercent;
+    if (allocation <= 0) continue;
+    borrowedSegments += 1;
+    const width = Math.min(allocation, remaining);
+    pieces.push({
+      left,
+      width,
+      stage:
+        borrowedSegments === 1
+          ? "borrow1"
+          : borrowedSegments === 2
+            ? "borrow2"
+            : "borrow3",
+    });
+    left += allocation;
+    remaining -= width;
+  }
+  return pieces;
+}
+
+function planSegmentLabel(startsAt: number) {
+  return new Intl.DateTimeFormat("ko-KR", { weekday: "short" }).format(
+    new Date(startsAt * 1000),
+  );
+}
+
+function DeviationPlanGauge({
+  usedPercent,
+  pace,
+}: {
+  usedPercent: number;
+  pace: PaceWindowView | undefined;
+}) {
+  const plannedPercent = pace?.plannedUsedPercent;
+  const delta = pace?.planDeltaPercentPoints;
+  const available =
+    plannedPercent !== null &&
+    plannedPercent !== undefined &&
+    delta !== null &&
+    delta !== undefined;
+
+  if (!available) {
+    return (
+      <div className="plan-visual">
+        <div className="plan-visual-heading">
+          <span>계획 대비</span>
+          <strong className="plan-visual-difference stage-near">
+            계산 불가
+          </strong>
+        </div>
+        <div className="deviation-labels" aria-hidden="true">
+          <span>여유</span>
+          <span>기준</span>
+          <span>초과</span>
+        </div>
+        <div
+          className="deviation-track is-unavailable"
+          role="img"
+          aria-label="권장선 계산 불가"
+        >
+          <i className="deviation-center" aria-hidden="true" />
+        </div>
+        <div className="plan-visual-detail">
+          현재 {Math.round(usedPercent)}% · 계획선 —
+        </div>
+      </div>
+    );
+  }
+
+  const normalized = Math.max(-1, Math.min(1, delta / PLAN_DEVIATION_RANGE));
+  const markerPercent = 50 + normalized * 50;
+  const nearPlanWidth = (1 / PLAN_DEVIATION_RANGE) * 100;
+  const clipped = Math.abs(delta) > PLAN_DEVIATION_RANGE;
+  const colorStage = planColorStage(delta, pace?.planBreakdown);
+  const stageBands = deviationStageBands(pace?.planBreakdown);
+  const direction = delta > 1 ? "over" : delta < -1 ? "under" : "near";
+
+  return (
+    <div className="plan-visual">
+      <div className="plan-visual-heading">
+        <span>계획 대비</span>
+        <strong
+          className={`plan-visual-difference direction-${direction} stage-${colorStage}`}
+        >
+          {formatPlanDifference(delta)}
+        </strong>
+      </div>
+      <div className="deviation-labels" aria-hidden="true">
+        <span>여유</span>
+        <span>기준</span>
+        <span>초과</span>
+      </div>
+      <div
+        className="deviation-track"
+        role="img"
+        aria-label={`${formatPlanDifference(delta)}, ${planColorStageLabel(colorStage)}, 표시 범위 ±${PLAN_DEVIATION_RANGE}%p`}
+      >
+        {stageBands.map((band, index) => (
+          <span
+            className={`deviation-stage-band stage-${band.stage}${
+              band.reachesTrackEnd ? " is-track-end" : ""
+            }`}
+            style={{ left: `${band.left}%`, width: `${band.width}%` }}
+            key={`${band.stage}-${index}`}
+            aria-hidden="true"
+          />
+        ))}
+        <span
+          className="deviation-near-zone"
+          style={
+            {
+              "--near-width": `${nearPlanWidth}%`,
+            } as CSSProperties
+          }
+          aria-hidden="true"
+        />
+        <i className="deviation-center" aria-hidden="true" />
+        <span
+          className={`deviation-marker marker-${direction} stage-${colorStage} ${
+            clipped ? "is-clipped" : ""
+          }`}
+          style={{ left: `${markerPercent}%` }}
+          aria-hidden="true"
+        />
+      </div>
+      <div className="plan-visual-detail">
+        현재 {Math.round(usedPercent)}% · 계획선 {Math.round(plannedPercent)}%
+      </div>
+    </div>
+  );
+}
+
+function WeeklyAllocationGauge({
+  usedPercent,
+  pace,
+  breakdown,
+}: {
+  usedPercent: number;
+  pace: PaceWindowView;
+  breakdown: PacePlanBreakdownView;
+}) {
+  const plannedPercent = pace.plannedUsedPercent!;
+  const delta = pace.planDeltaPercentPoints!;
+  const colorStage = planColorStage(delta, breakdown);
+  const overrunPieces = allocationOverrunPieces(
+    usedPercent,
+    plannedPercent,
+    breakdown,
+  );
+  const currentSegment = breakdown.segments[breakdown.currentSegmentIndex];
+  const currentLabel = planSegmentLabel(currentSegment.startsAt);
+
+  return (
+    <div className="plan-visual">
+      <div className="plan-visual-heading">
+        <span>주간 계획 배분</span>
+        <strong
+          className={`plan-visual-difference direction-${
+            delta > 1 ? "over" : delta < -1 ? "under" : "near"
+          } stage-${colorStage}`}
+        >
+          {formatPlanDifference(delta)}
+        </strong>
+      </div>
+      <div className="allocation-labels" aria-hidden="true">
+        {breakdown.segments.map((segment, index) => (
+          <span
+            className={
+              index === breakdown.currentSegmentIndex ? "is-current" : ""
+            }
+            style={{ flexBasis: `${segment.allocationPercent}%` }}
+            key={segment.startsAt}
+          >
+            {segment.allocationPercent > 0
+              ? planSegmentLabel(segment.startsAt)
+              : null}
+          </span>
+        ))}
+      </div>
+      <div
+        className="allocation-track"
+        role="img"
+        aria-label={`요일별 계획 배분, ${currentLabel} 시작 구간까지 ${Math.round(
+          plannedPercent,
+        )}%, 현재 ${Math.round(usedPercent)}%, ${formatPlanDifference(
+          delta,
+        )}, ${planColorStageLabel(colorStage)}`}
+      >
+        {breakdown.segments.map((segment, index) => {
+          const left =
+            index === 0 ? 0 : breakdown.segments[index - 1].cumulativePercent;
+          return (
+            <span
+              className={`allocation-segment ${
+                index < breakdown.currentSegmentIndex
+                  ? "is-past"
+                  : index === breakdown.currentSegmentIndex
+                    ? "is-current"
+                    : "is-future"
+              } ${segment.allocationPercent === 0 ? "is-zero" : ""}`}
+              style={{
+                left: `${left}%`,
+                width: `${segment.allocationPercent}%`,
+              }}
+              key={`${segment.startsAt}-segment`}
+              aria-hidden="true"
+            />
+          );
+        })}
+        <span
+          className="allocation-used"
+          style={{ width: `${usedPercent}%` }}
+          aria-hidden="true"
+        />
+        {overrunPieces.map((piece, index) => (
+          <span
+            className={`allocation-overrun stage-${piece.stage}`}
+            style={{ left: `${piece.left}%`, width: `${piece.width}%` }}
+            key={`${piece.stage}-${index}`}
+            aria-hidden="true"
+          />
+        ))}
+        {breakdown.segments.slice(0, -1).map((segment) => (
+          <i
+            className="allocation-boundary"
+            style={{ left: `${segment.cumulativePercent}%` }}
+            key={`${segment.startsAt}-boundary`}
+            aria-hidden="true"
+          />
+        ))}
+        <i
+          className="allocation-plan-marker"
+          style={{ left: `${plannedPercent}%` }}
+          aria-hidden="true"
+        />
+      </div>
+      <div className="plan-visual-detail">
+        현재 {Math.round(usedPercent)}% · {currentLabel} 시작 구간까지{" "}
+        {Math.round(plannedPercent)}%
+      </div>
+    </div>
+  );
+}
+
+function PlanVisualization({
+  usedPercent,
+  pace,
+  visualization,
+}: {
+  usedPercent: number;
+  pace: PaceWindowView | undefined;
+  visualization: LargePlanVisualization;
+}) {
+  const breakdown = pace?.planBreakdown;
+  if (
+    visualization === "weeklyAllocation" &&
+    breakdown?.kind === "weekly" &&
+    pace?.plannedUsedPercent !== null &&
+    pace?.plannedUsedPercent !== undefined &&
+    pace.planDeltaPercentPoints !== null &&
+    pace.planDeltaPercentPoints !== undefined
+  ) {
+    return (
+      <WeeklyAllocationGauge
+        usedPercent={usedPercent}
+        pace={pace}
+        breakdown={breakdown}
+      />
+    );
+  }
+  return <DeviationPlanGauge usedPercent={usedPercent} pace={pace} />;
 }
 
 function ForecastTimeline({
@@ -396,25 +763,16 @@ function PaceRow({
   window,
   pace,
   updatedAt,
+  visualization,
 }: {
   window: UsageWindow;
   pace: PaceWindowView | undefined;
   updatedAt: number | null;
+  visualization: LargePlanVisualization;
 }) {
   const usedPercent = Math.max(0, Math.min(100, window.usedPercent));
-  const plannedPercent =
-    pace?.plannedUsedPercent === null || pace?.plannedUsedPercent === undefined
-      ? null
-      : Math.max(0, Math.min(100, pace.plannedUsedPercent));
   const status = paceDisplayStatus(pace, window.resetsAt);
-  const hasOverrun =
-    plannedPercent !== null &&
-    (pace?.planDeltaPercentPoints ?? 0) > 1 &&
-    usedPercent > plannedPercent;
-  const overrunWidth =
-    hasOverrun && plannedPercent !== null ? usedPercent - plannedPercent : 0;
   const basisLabel = forecastBasisLabel(pace);
-  const planDetail = visiblePlanLabel(pace, status);
 
   return (
     <article className={`pace-row status-${status}`}>
@@ -432,46 +790,11 @@ function PaceRow({
         updatedAt={updatedAt}
         status={status}
       />
-      <div className="gauge-labels" aria-hidden="true">
-        <span>사용 {Math.round(usedPercent)}%</span>
-        <span>
-          {plannedPercent === null
-            ? "권장 —"
-            : `권장 ${Math.round(plannedPercent)}%`}
-        </span>
-      </div>
-      <div
-        className="pace-gauge"
-        role="img"
-        aria-label={`${Math.round(usedPercent)}% 사용, 현재 권장 ${
-          plannedPercent === null
-            ? "계산 불가"
-            : `${Math.round(plannedPercent)}%`
-        }, ${planLabel(pace)}`}
-      >
-        <span className="gauge-actual" style={{ width: `${usedPercent}%` }} />
-        {hasOverrun && plannedPercent !== null && (
-          <span
-            className="gauge-overrun"
-            style={{
-              left: `${plannedPercent}%`,
-              width: `${overrunWidth}%`,
-            }}
-          />
-        )}
-        {plannedPercent !== null && (
-          <i
-            className={`gauge-marker align-${markerAlignment(plannedPercent)}`}
-            style={{ left: `${plannedPercent}%` }}
-            aria-hidden="true"
-          />
-        )}
-      </div>
-      {planDetail !== null && (
-        <div className={`plan-detail ${hasOverrun ? "is-overrun" : ""}`}>
-          {planDetail}
-        </div>
-      )}
+      <PlanVisualization
+        usedPercent={usedPercent}
+        pace={pace}
+        visualization={visualization}
+      />
     </article>
   );
 }
@@ -479,9 +802,11 @@ function PaceRow({
 function LargeOverlay({
   usage,
   pace,
+  planVisualization,
 }: {
   usage: UsageViewState;
   pace: PaceViewState;
+  planVisualization: LargePlanVisualization;
 }) {
   const windows = useMemo(() => sortedWindows(usage.windows), [usage.windows]);
   const paceByWindow = useMemo(
@@ -511,6 +836,7 @@ function LargeOverlay({
             window={window}
             pace={paceByWindow.get(window.id)}
             updatedAt={pace.updatedAt}
+            visualization={planVisualization}
           />
         ))}
       </div>
@@ -522,6 +848,8 @@ function App() {
   const [usage, setUsage] = useState<UsageViewState>(INITIAL_USAGE_STATE);
   const [pace, setPace] = useState<PaceViewState>(INITIAL_PACE_STATE);
   const [sizeMode, setSizeMode] = useState<OverlaySize>("middle");
+  const [largePlanVisualization, setLargePlanVisualization] =
+    useState<LargePlanVisualization>("deviation");
   const [opacity, setOpacity] = useState(DEFAULT_OVERLAY_OPACITY);
   const [opacityPhase, setOpacityPhase] =
     useState<OverlayOpacityPhase>("committed");
@@ -590,6 +918,13 @@ function App() {
       invoke<OverlaySize>("get_overlay_size").then((size) => {
         if (isOverlaySize(size)) setSizeMode(size);
       }),
+      invoke<LargePlanVisualization>("get_large_plan_visualization").then(
+        (visualization) => {
+          if (isLargePlanVisualization(visualization)) {
+            setLargePlanVisualization(visualization);
+          }
+        },
+      ),
       invoke<OverlayOpacityUpdate>("get_effective_overlay_opacity").then(
         applyOpacityUpdate,
       ),
@@ -608,6 +943,14 @@ function App() {
       "ui://overlay-opacity-updated",
       (event) => applyOpacityUpdate(event.payload),
     );
+    const unlistenLargePlanVisualization = listen<LargePlanVisualization>(
+      "ui://large-plan-visualization-changed",
+      (event) => {
+        if (isLargePlanVisualization(event.payload)) {
+          setLargePlanVisualization(event.payload);
+        }
+      },
+    );
     const unlistenPace = listen<PaceViewState>(
       "pace://state-changed",
       (event) => setPace(event.payload),
@@ -617,6 +960,7 @@ function App() {
       void unlistenUsage.then((unlisten) => unlisten());
       void unlistenOverlaySize.then((unlisten) => unlisten());
       void unlistenOverlayOpacity.then((unlisten) => unlisten());
+      void unlistenLargePlanVisualization.then((unlisten) => unlisten());
       void unlistenPace.then((unlisten) => unlisten());
       void unlistenPickCli.then((unlisten) => unlisten());
     };
@@ -652,7 +996,11 @@ function App() {
       ) : sizeMode === "middle" ? (
         <MiddleOverlay usage={usage} featured={featured} />
       ) : (
-        <LargeOverlay usage={usage} pace={pace} />
+        <LargeOverlay
+          usage={usage}
+          pace={pace}
+          planVisualization={largePlanVisualization}
+        />
       )}
     </main>
   );

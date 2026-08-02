@@ -39,6 +39,19 @@ export type ForecastBasis = "recent" | "periodAverage" | "unavailable";
 export type PaceStatus =
   "safe" | "planExceeded" | "exhaustionRisk" | "unavailable";
 
+export interface PacePlanSegmentView {
+  startsAt: number;
+  endsAt: number;
+  allocationPercent: number;
+  cumulativePercent: number;
+}
+
+export interface PacePlanBreakdownView {
+  kind: "weekly";
+  currentSegmentIndex: number;
+  segments: PacePlanSegmentView[];
+}
+
 export interface PaceWindowView {
   windowId: string;
   forecastBasis: ForecastBasis;
@@ -47,6 +60,7 @@ export interface PaceWindowView {
   projectedEndPercent: number | null;
   plannedUsedPercent: number | null;
   planDeltaPercentPoints: number | null;
+  planBreakdown?: PacePlanBreakdownView | null;
   status: PaceStatus;
   earlyEstimate: boolean;
 }
@@ -57,6 +71,7 @@ export interface PaceViewState {
 }
 
 export type PacePlanMode = "even" | "weekday";
+export type LargePlanVisualization = "deviation" | "weeklyAllocation";
 
 export interface PaceSettings {
   planMode: PacePlanMode;
@@ -67,6 +82,7 @@ export interface PaceSettings {
 export interface EditableSettings {
   paceSettings: PaceSettings;
   overlayOpacity: number;
+  largePlanVisualization: LargePlanVisualization;
 }
 
 export interface SettingsSession {

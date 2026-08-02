@@ -7,6 +7,14 @@ pub const DEFAULT_OVERLAY_OPACITY: u8 = 100;
 pub const MIN_OVERLAY_OPACITY: u8 = 40;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LargePlanVisualization {
+    #[default]
+    Deviation,
+    WeeklyAllocation,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OverlaySize {
     Small,
@@ -39,6 +47,7 @@ pub struct PaceSettings {
 pub struct EditableSettings {
     pub pace_settings: PaceSettings,
     pub overlay_opacity: u8,
+    pub large_plan_visualization: LargePlanVisualization,
 }
 
 impl EditableSettings {
@@ -101,6 +110,8 @@ pub struct AppSettings {
     #[serde(default = "default_overlay_opacity")]
     pub overlay_opacity: u8,
     #[serde(default)]
+    pub large_plan_visualization: LargePlanVisualization,
+    #[serde(default)]
     pub pace: PaceSettings,
 }
 
@@ -111,6 +122,7 @@ impl Default for AppSettings {
             window_position: None,
             overlay_size: OverlaySize::default(),
             overlay_opacity: DEFAULT_OVERLAY_OPACITY,
+            large_plan_visualization: LargePlanVisualization::default(),
             pace: PaceSettings::default(),
         }
     }
@@ -202,10 +214,12 @@ impl SettingsStore {
             .map(|value| EditableSettings {
                 pace_settings: value.pace.clone(),
                 overlay_opacity: value.overlay_opacity,
+                large_plan_visualization: value.large_plan_visualization,
             })
             .unwrap_or_else(|_| EditableSettings {
                 pace_settings: PaceSettings::default(),
                 overlay_opacity: DEFAULT_OVERLAY_OPACITY,
+                large_plan_visualization: LargePlanVisualization::default(),
             })
     }
 
@@ -221,6 +235,7 @@ impl SettingsStore {
         let mut next = value.clone();
         next.pace = settings.pace_settings.clone();
         next.overlay_opacity = settings.overlay_opacity;
+        next.large_plan_visualization = settings.large_plan_visualization;
         self.save_locked(&next)?;
         *value = next;
         Ok(settings)
@@ -230,6 +245,13 @@ impl SettingsStore {
         self.value
             .lock()
             .map(|value| value.pace.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn large_plan_visualization(&self) -> LargePlanVisualization {
+        self.value
+            .lock()
+            .map(|value| value.large_plan_visualization)
             .unwrap_or_default()
     }
 
@@ -267,8 +289,8 @@ pub fn validate_overlay_opacity(opacity: u8) -> Result<(), String> {
 mod tests {
     use super::{
         normalize_overlay_opacity, validate_overlay_opacity, AppSettings, EditableSettings,
-        OverlaySize, PacePlanMode, PaceSettings, SettingsStore, DEFAULT_OVERLAY_OPACITY,
-        MIN_OVERLAY_OPACITY,
+        LargePlanVisualization, OverlaySize, PacePlanMode, PaceSettings, SettingsStore,
+        DEFAULT_OVERLAY_OPACITY, MIN_OVERLAY_OPACITY,
     };
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
@@ -283,6 +305,10 @@ mod tests {
         assert_eq!(settings.overlay_opacity, DEFAULT_OVERLAY_OPACITY);
         assert_eq!(settings.codex_executable.as_deref(), Some("codex"));
         assert_eq!(settings.pace.plan_mode, PacePlanMode::Even);
+        assert_eq!(
+            settings.large_plan_visualization,
+            LargePlanVisualization::Deviation
+        );
         assert!(!settings.pace.os_notifications_enabled);
     }
 
@@ -312,6 +338,20 @@ mod tests {
         assert!(serde_json::to_string(&settings)
             .unwrap()
             .contains(r#""overlaySize":"large""#));
+    }
+
+    #[test]
+    fn large_plan_visualization_uses_stable_camel_case_values() {
+        let settings: AppSettings =
+            serde_json::from_str(r#"{"largePlanVisualization":"weeklyAllocation"}"#).unwrap();
+
+        assert_eq!(
+            settings.large_plan_visualization,
+            LargePlanVisualization::WeeklyAllocation
+        );
+        assert!(serde_json::to_string(&settings)
+            .unwrap()
+            .contains(r#""largePlanVisualization":"weeklyAllocation""#));
     }
 
     #[test]
@@ -349,6 +389,7 @@ mod tests {
                 ..PaceSettings::default()
             },
             overlay_opacity: 65,
+            large_plan_visualization: LargePlanVisualization::WeeklyAllocation,
         };
 
         store.set_editable_settings(editable.clone()).unwrap();
@@ -375,6 +416,7 @@ mod tests {
                 ..PaceSettings::default()
             },
             overlay_opacity: 65,
+            large_plan_visualization: LargePlanVisualization::WeeklyAllocation,
         };
 
         assert!(store.set_editable_settings(changed).is_err());
@@ -383,6 +425,7 @@ mod tests {
             EditableSettings {
                 pace_settings: PaceSettings::default(),
                 overlay_opacity: DEFAULT_OVERLAY_OPACITY,
+                large_plan_visualization: LargePlanVisualization::Deviation,
             }
         );
     }

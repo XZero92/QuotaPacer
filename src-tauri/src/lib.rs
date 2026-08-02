@@ -7,7 +7,8 @@ use codex::{inspect_cli, CliInfo, UsageService};
 use pace::{PaceService, PaceViewState};
 use serde::Serialize;
 use settings::{
-    validate_overlay_opacity, EditableSettings, OverlaySize, SettingsStore, StoredPosition,
+    validate_overlay_opacity, EditableSettings, LargePlanVisualization, OverlaySize, SettingsStore,
+    StoredPosition,
 };
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -248,6 +249,11 @@ fn get_overlay_size(state: State<'_, AppState>) -> OverlaySize {
 }
 
 #[tauri::command]
+fn get_large_plan_visualization(state: State<'_, AppState>) -> LargePlanVisualization {
+    state.settings.large_plan_visualization()
+}
+
+#[tauri::command]
 fn begin_settings_session(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -308,6 +314,11 @@ fn save_editable_settings(
     drop(preview);
     state.pace.recompute(&state.usage.state());
     emit_opacity_update(&app, update);
+    let _ = app.emit_to(
+        "main",
+        "ui://large-plan-visualization-changed",
+        saved.large_plan_visualization,
+    );
     Ok(SettingsSession {
         session_id: next_session_id,
         settings: saved,
@@ -419,6 +430,7 @@ pub fn run() {
             refresh_usage,
             set_codex_executable,
             get_overlay_size,
+            get_large_plan_visualization,
             begin_settings_session,
             preview_overlay_opacity,
             save_editable_settings,

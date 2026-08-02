@@ -1,6 +1,9 @@
 :root {
   --color-actual: #72e6ad;
   --color-plan-warning: #f4b95f;
+  --color-borrow-1: #efd777;
+  --color-borrow-2: #f4b95f;
+  --color-borrow-3: #ed8747;
   --color-exhaustion-danger: #ff6b72;
   --color-unavailable: #9da5af;
   --color-track: #30343b;
@@ -396,49 +399,267 @@ body,
   color: #59616c;
 }
 
-.gauge-labels {
+.plan-visual {
+  margin-top: 7px;
+}
+
+.plan-visual-heading {
+  display: flex;
   min-width: 0;
-  margin-top: 9px;
+  align-items: center;
+  justify-content: space-between;
   color: var(--color-secondary-text);
   font-size: 12px;
-  font-variant-numeric: tabular-nums;
   line-height: 16px;
 }
 
-.gauge-labels span:last-child {
-  color: var(--color-marker);
+.plan-visual-heading > span {
+  flex: 0 0 auto;
 }
 
-.pace-gauge {
+.plan-visual-difference {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-marker);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-visual-difference.direction-under {
+  color: var(--color-actual);
+}
+
+.plan-visual-difference.stage-borrow1 {
+  color: var(--color-borrow-1);
+}
+
+.plan-visual-difference.stage-borrow2 {
+  color: var(--color-borrow-2);
+}
+
+.plan-visual-difference.stage-borrow3 {
+  color: var(--color-borrow-3);
+}
+
+.deviation-labels {
+  display: grid;
+  margin-top: 1px;
+  color: #777f8a;
+  font-size: 11px;
+  line-height: 14px;
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.deviation-labels span:nth-child(2) {
+  text-align: center;
+}
+
+.deviation-labels span:last-child {
+  text-align: right;
+}
+
+.deviation-track,
+.allocation-track {
   position: relative;
-  height: 8px;
-  margin: 3px 2px 0;
+  height: 10px;
+  margin: 2px 2px 0;
   background: var(--color-track);
   border-radius: 999px;
 }
 
-.pace-gauge > span {
+.deviation-track {
+  background:
+    linear-gradient(90deg, rgb(114 230 173 / 14%) 0 50%, transparent 50% 100%),
+    var(--color-track);
+}
+
+.deviation-track.is-unavailable {
+  opacity: 0.65;
+}
+
+.deviation-stage-band {
   position: absolute;
   top: 0;
   height: 100%;
 }
 
-.gauge-actual {
-  left: 0;
-  background: var(--color-actual);
-  border-radius: inherit;
-}
-
-.gauge-overrun {
-  z-index: 1;
-  background: var(--color-plan-warning);
+.deviation-stage-band.is-track-end {
   border-radius: 0 999px 999px 0;
 }
 
-.gauge-marker {
+.deviation-stage-band.stage-borrow1 {
+  background: rgb(239 215 119 / 24%);
+}
+
+.deviation-stage-band.stage-borrow2 {
+  background: rgb(244 185 95 / 28%);
+}
+
+.deviation-stage-band.stage-borrow3 {
+  background: rgb(237 135 71 / 34%);
+}
+
+.deviation-near-zone {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: 50%;
+  width: var(--near-width);
+  height: 100%;
+  background: #4a4d52;
+  transform: translateX(-50%);
+}
+
+.deviation-center {
   position: absolute;
   z-index: 2;
-  top: -4px;
+  top: -3px;
+  left: 50%;
+  width: 1px;
+  height: 16px;
+  background: var(--color-marker);
+  transform: translateX(-50%);
+}
+
+.deviation-marker {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  color: var(--color-marker);
+  background: currentcolor;
+  border: 2px solid #14161a;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.deviation-marker.marker-under {
+  color: var(--color-actual);
+}
+
+.deviation-marker.stage-borrow1 {
+  color: var(--color-borrow-1);
+}
+
+.deviation-marker.stage-borrow2 {
+  color: var(--color-borrow-2);
+}
+
+.deviation-marker.stage-borrow3 {
+  color: var(--color-borrow-3);
+}
+
+.deviation-marker.is-clipped::after {
+  position: absolute;
+  top: 50%;
+  width: 0;
+  height: 0;
+  content: "";
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transform: translateY(-50%);
+}
+
+.deviation-marker.marker-under.is-clipped::after {
+  right: 5px;
+  border-right: 5px solid currentcolor;
+}
+
+.deviation-marker.marker-over.is-clipped::after {
+  left: 5px;
+  border-left: 5px solid currentcolor;
+}
+
+.allocation-labels {
+  display: flex;
+  height: 14px;
+  margin-top: 1px;
+  align-items: end;
+  color: #777f8a;
+  font-size: 10px;
+}
+
+.allocation-labels span {
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.allocation-labels span.is-current {
+  color: var(--color-marker);
+  font-weight: 800;
+}
+
+.allocation-track {
+  overflow: visible;
+  border-radius: 3px;
+}
+
+.allocation-segment,
+.allocation-used,
+.allocation-overrun {
+  position: absolute;
+  top: 0;
+  height: 100%;
+}
+
+.allocation-segment {
+  z-index: 0;
+}
+
+.allocation-segment.is-current {
+  background: rgb(246 247 249 / 10%);
+}
+
+.allocation-segment.is-future {
+  background: rgb(174 180 189 / 4%);
+}
+
+.allocation-segment.is-zero {
+  width: 1px !important;
+  background: rgb(157 165 175 / 60%);
+}
+
+.allocation-used {
+  z-index: 1;
+  left: 0;
+  background: var(--color-actual);
+  border-radius: 3px;
+}
+
+.allocation-overrun {
+  z-index: 2;
+}
+
+.allocation-overrun.stage-borrow1 {
+  background: var(--color-borrow-1);
+}
+
+.allocation-overrun.stage-borrow2 {
+  background: var(--color-borrow-2);
+}
+
+.allocation-overrun.stage-borrow3 {
+  background: var(--color-borrow-3);
+}
+
+.allocation-boundary {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  width: 1px;
+  height: 100%;
+  background: rgb(20 22 26 / 75%);
+}
+
+.allocation-plan-marker {
+  position: absolute;
+  z-index: 4;
+  top: -3px;
   width: 2px;
   height: 16px;
   background: var(--color-marker);
@@ -446,15 +667,7 @@ body,
   transform: translateX(-1px);
 }
 
-.gauge-marker.align-start {
-  transform: none;
-}
-
-.gauge-marker.align-end {
-  transform: translateX(-2px);
-}
-
-.plan-detail {
+.plan-visual-detail {
   margin-top: 4px;
   overflow: hidden;
   color: var(--color-secondary-text);
@@ -462,11 +675,6 @@ body,
   line-height: 15px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.plan-detail.is-overrun {
-  color: var(--color-plan-warning);
-  font-weight: 700;
 }
 
 .forecast-timeline {
@@ -621,8 +829,10 @@ body,
 
   .small-ring,
   .usage-meter span,
-  .pace-gauge > span,
-  .gauge-marker,
+  .deviation-marker,
+  .allocation-used,
+  .allocation-overrun,
+  .allocation-plan-marker,
   .timeline-marker {
     transition:
       background 160ms ease,

@@ -15,6 +15,7 @@ import {
 } from "@tauri-apps/plugin-notification";
 import type {
   EditableSettings,
+  LargePlanVisualization,
   PacePlanMode,
   PaceSettings,
   SettingsSession,
@@ -31,6 +32,7 @@ const DEFAULT_PACE_SETTINGS: PaceSettings = {
 const DEFAULT_EDITABLE_SETTINGS: EditableSettings = {
   paceSettings: DEFAULT_PACE_SETTINGS,
   overlayOpacity: DEFAULT_OVERLAY_OPACITY,
+  largePlanVisualization: "deviation",
 };
 
 type PermissionStatus = "checking" | "granted" | "denied";
@@ -38,6 +40,7 @@ type PermissionStatus = "checking" | "granted" | "denied";
 function settingsEqual(left: EditableSettings, right: EditableSettings) {
   return (
     left.overlayOpacity === right.overlayOpacity &&
+    left.largePlanVisualization === right.largePlanVisualization &&
     left.paceSettings.planMode === right.paceSettings.planMode &&
     left.paceSettings.osNotificationsEnabled ===
       right.paceSettings.osNotificationsEnabled &&
@@ -334,6 +337,16 @@ function SettingsApp() {
     setMessage("");
   };
 
+  const setLargePlanVisualization = (
+    largePlanVisualization: LargePlanVisualization,
+  ) => {
+    setDraftSettings((current) => ({
+      ...current,
+      largePlanVisualization,
+    }));
+    setMessage("");
+  };
+
   const toggleNotifications = async (enabled: boolean) => {
     if (!enabled) {
       setDraftSettings((current) => ({
@@ -502,6 +515,68 @@ function SettingsApp() {
               </p>
             </>
           )}
+          <div className="plan-visualization-setting">
+            <h3>Large 모드 · 7일 계획 표시</h3>
+            <p className="section-help">
+              다른 길이의 제한 창은 항상 페이스 편차로 표시합니다.
+            </p>
+            <div
+              className="visualization-options"
+              role="radiogroup"
+              aria-label="Large 모드 7일 계획 표시"
+            >
+              <button
+                type="button"
+                role="radio"
+                aria-checked={
+                  draftSettings.largePlanVisualization === "deviation"
+                }
+                className={
+                  draftSettings.largePlanVisualization === "deviation"
+                    ? "selected"
+                    : ""
+                }
+                disabled={formBusy}
+                onClick={() => setLargePlanVisualization("deviation")}
+              >
+                <span
+                  className="visualization-preview preview-deviation"
+                  aria-hidden="true"
+                >
+                  <i />
+                  <b />
+                </span>
+                <strong>페이스 편차</strong>
+                <small>계획선보다 앞서거나 뒤처진 정도</small>
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={
+                  draftSettings.largePlanVisualization === "weeklyAllocation"
+                }
+                className={
+                  draftSettings.largePlanVisualization === "weeklyAllocation"
+                    ? "selected"
+                    : ""
+                }
+                disabled={formBusy}
+                onClick={() => setLargePlanVisualization("weeklyAllocation")}
+              >
+                <span
+                  className="visualization-preview preview-allocation"
+                  aria-hidden="true"
+                >
+                  {DAY_LABELS.map((label) => (
+                    <i key={label} />
+                  ))}
+                  <b />
+                </span>
+                <strong>주간 배분</strong>
+                <small>요일별 계획과 누적 사용량</small>
+              </button>
+            </div>
+          </div>
         </section>
 
         <section>
