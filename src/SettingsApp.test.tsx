@@ -101,12 +101,22 @@ describe("설정 창", () => {
     expect(screen.getByText("합계 100.0%")).toBeInTheDocument();
   });
 
-  it("Large 모드의 7일 계획 표시 방식을 선택하고 저장한다", async () => {
+  it("Large 모드의 7일 계획 표시 방식을 즉시 미리보고 저장한다", async () => {
     await renderLoadedSettings();
 
     expect(screen.getByRole("radio", { name: /페이스 편차/ })).toBeChecked();
     fireEvent.click(screen.getByRole("radio", { name: /주간 배분/ }));
     expect(screen.getByRole("radio", { name: /주간 배분/ })).toBeChecked();
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith("preview_overlay_appearance", {
+        sessionId: 1,
+        revision: 1,
+        appearance: {
+          overlayOpacity: 100,
+          largePlanVisualization: "weeklyAllocation",
+        },
+      }),
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "저장" }));
     await waitFor(() =>
@@ -117,6 +127,29 @@ describe("설정 창", () => {
         }),
       }),
     );
+  });
+
+  it("투명도와 Large 표시 방식의 연속 변경을 하나의 외형 스냅샷으로 합친다", async () => {
+    const slider = await renderLoadedSettings();
+
+    fireEvent.click(screen.getByRole("radio", { name: /주간 배분/ }));
+    fireEvent.change(slider, { target: { value: "65" } });
+
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith("preview_overlay_appearance", {
+        sessionId: 1,
+        revision: 1,
+        appearance: {
+          overlayOpacity: 65,
+          largePlanVisualization: "weeklyAllocation",
+        },
+      }),
+    );
+    expect(
+      mocks.invoke.mock.calls.filter(
+        ([command]) => command === "preview_overlay_appearance",
+      ),
+    ).toHaveLength(1);
   });
 
   it("유효한 요일별 배분은 균등 모드를 거쳐도 보존한다", async () => {
@@ -184,7 +217,7 @@ describe("설정 창", () => {
     expect(screen.getByText("합계 100.0%")).toBeInTheDocument();
   });
 
-  it("잘못된 요일 배분은 저장만 막고 투명도 미리보기는 허용한다", async () => {
+  it("잘못된 요일 배분은 저장만 막고 외형 미리보기는 허용한다", async () => {
     const slider = await renderLoadedSettings();
     fireEvent.click(screen.getByRole("radio", { name: "요일별 배분" }));
     fireEvent.change(screen.getByLabelText("월요일 배분율"), {
@@ -195,10 +228,13 @@ describe("설정 창", () => {
     expect(screen.getByText(/100±0.1%로 맞춰주세요/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
     await waitFor(() =>
-      expect(mocks.invoke).toHaveBeenCalledWith("preview_overlay_opacity", {
+      expect(mocks.invoke).toHaveBeenCalledWith("preview_overlay_appearance", {
         sessionId: 1,
         revision: 1,
-        opacityPercent: 65,
+        appearance: {
+          overlayOpacity: 65,
+          largePlanVisualization: "deviation",
+        },
       }),
     );
     expect(mocks.invoke).not.toHaveBeenCalledWith(

@@ -16,6 +16,7 @@ import {
 import type {
   EditableSettings,
   LargePlanVisualization,
+  OverlayAppearance,
   PacePlanMode,
   PaceSettings,
   SettingsSession,
@@ -34,6 +35,15 @@ const DEFAULT_EDITABLE_SETTINGS: EditableSettings = {
   overlayOpacity: DEFAULT_OVERLAY_OPACITY,
   largePlanVisualization: "deviation",
 };
+
+function overlayAppearanceFromSettings(
+  settings: EditableSettings,
+): OverlayAppearance {
+  return {
+    overlayOpacity: settings.overlayOpacity,
+    largePlanVisualization: settings.largePlanVisualization,
+  };
+}
 
 type PermissionStatus = "checking" | "granted" | "denied";
 
@@ -81,7 +91,9 @@ function SettingsApp() {
   const sessionReloadRequestedRef = useRef(false);
   const previewRevisionRef = useRef(0);
   const previewFrameRef = useRef<number | null>(null);
-  const pendingOpacityRef = useRef(DEFAULT_OVERLAY_OPACITY);
+  const pendingAppearanceRef = useRef<OverlayAppearance>(
+    overlayAppearanceFromSettings(DEFAULT_EDITABLE_SETTINGS),
+  );
   const requestCloseRef = useRef<() => void>(() => undefined);
   const opacityTooltipTimerRef = useRef<number | null>(null);
   const opacityPointerActiveRef = useRef(false);
@@ -142,7 +154,9 @@ function SettingsApp() {
       hideOpacityTooltip();
       sessionIdRef.current = session.sessionId;
       previewRevisionRef.current = 0;
-      pendingOpacityRef.current = session.settings.overlayOpacity;
+      pendingAppearanceRef.current = overlayAppearanceFromSettings(
+        session.settings,
+      );
       setSessionId(session.sessionId);
       setPersistedSettings(session.settings);
       setDraftSettings(session.settings);
@@ -178,25 +192,28 @@ function SettingsApp() {
       .catch(() => setPermission("denied"));
   }, []);
 
-  const scheduleOpacityPreview = useCallback((opacityPercent: number) => {
-    pendingOpacityRef.current = opacityPercent;
-    if (previewFrameRef.current !== null) return;
-    previewFrameRef.current = window.requestAnimationFrame(() => {
-      previewFrameRef.current = null;
-      const activeSessionId = sessionIdRef.current;
-      if (activeSessionId === null) return;
-      const revision = ++previewRevisionRef.current;
-      void invoke("preview_overlay_opacity", {
-        sessionId: activeSessionId,
-        revision,
-        opacityPercent: pendingOpacityRef.current,
-      }).catch((error) => {
-        if (sessionIdRef.current === activeSessionId) {
-          setMessage(String(error));
-        }
+  const scheduleAppearancePreview = useCallback(
+    (appearance: OverlayAppearance) => {
+      pendingAppearanceRef.current = appearance;
+      if (previewFrameRef.current !== null) return;
+      previewFrameRef.current = window.requestAnimationFrame(() => {
+        previewFrameRef.current = null;
+        const activeSessionId = sessionIdRef.current;
+        if (activeSessionId === null) return;
+        const revision = ++previewRevisionRef.current;
+        void invoke("preview_overlay_appearance", {
+          sessionId: activeSessionId,
+          revision,
+          appearance: pendingAppearanceRef.current,
+        }).catch((error) => {
+          if (sessionIdRef.current === activeSessionId) {
+            setMessage(String(error));
+          }
+        });
       });
-    });
-  }, []);
+    },
+    [],
+  );
 
   const cancelSessionAndHide = useCallback(async () => {
     cancelScheduledPreview();
@@ -333,7 +350,10 @@ function SettingsApp() {
       ...current,
       overlayOpacity: opacityPercent,
     }));
-    scheduleOpacityPreview(opacityPercent);
+    scheduleAppearancePreview({
+      ...pendingAppearanceRef.current,
+      overlayOpacity: opacityPercent,
+    });
     setMessage("");
   };
 
@@ -344,6 +364,10 @@ function SettingsApp() {
       ...current,
       largePlanVisualization,
     }));
+    scheduleAppearancePreview({
+      ...pendingAppearanceRef.current,
+      largePlanVisualization,
+    });
     setMessage("");
   };
 
@@ -518,7 +542,9 @@ function SettingsApp() {
           <div className="plan-visualization-setting">
             <h3>Large 모드 · 7일 계획 표시</h3>
             <p className="section-help">
-              다른 길이의 제한 창은 항상 페이스 편차로 표시합니다.
+              정확히 7일인 제한 창에 적용되며, 현재 오버레이가 Large이면 선택
+              즉시 미리보기됩니다. 다른 길이의 제한 창은 항상 페이스 편차로
+              표시합니다.
             </p>
             <div
               className="visualization-options"
@@ -710,7 +736,7 @@ function SettingsApp() {
           >
             <h2 id="unsaved-title">변경사항을 저장할까요?</h2>
             <p id="unsaved-description">
-              저장하지 않으면 투명도 미리보기를 포함한 변경사항이 사라집니다.
+              저장하지 않으면 오버레이 미리보기를 포함한 변경사항이 사라집니다.
             </p>
             <div className="confirm-actions">
               <button

@@ -41,7 +41,7 @@ body,
   user-select: none;
 }
 
-.overlay.is-opacity-previewing {
+.overlay.is-appearance-previewing {
   transition: none;
 }
 
@@ -867,8 +867,12 @@ body,
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .overlay:not(.is-opacity-previewing) {
+  .overlay:not(.is-appearance-previewing) {
     transition: opacity 120ms ease;
+  }
+
+  .plan-visual.with-transition {
+    animation: plan-visual-enter 140ms ease-out;
   }
 
   .small-ring,
@@ -886,5 +890,17 @@ body,
       width 160ms ease,
       left 160ms ease,
       transform 160ms ease;
+  }
+
+  @keyframes plan-visual-enter {
+    from {
+      opacity: 0;
+      transform: translateY(1px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 }

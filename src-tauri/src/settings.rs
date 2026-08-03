@@ -201,13 +201,6 @@ impl SettingsStore {
         self.save_locked(&value)
     }
 
-    pub fn overlay_opacity(&self) -> u8 {
-        self.value
-            .lock()
-            .map(|value| value.overlay_opacity)
-            .unwrap_or(DEFAULT_OVERLAY_OPACITY)
-    }
-
     pub fn editable_settings(&self) -> EditableSettings {
         self.value
             .lock()
@@ -245,13 +238,6 @@ impl SettingsStore {
         self.value
             .lock()
             .map(|value| value.pace.clone())
-            .unwrap_or_default()
-    }
-
-    pub fn large_plan_visualization(&self) -> LargePlanVisualization {
-        self.value
-            .lock()
-            .map(|value| value.large_plan_visualization)
             .unwrap_or_default()
     }
 

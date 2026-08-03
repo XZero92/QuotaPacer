@@ -13,8 +13,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type {
   CliInfo,
   LargePlanVisualization,
-  OverlayOpacityPhase,
-  OverlayOpacityUpdate,
+  OverlayAppearancePhase,
+  OverlayAppearanceUpdate,
   PacePlanBreakdownView,
   PaceViewState,
   PaceWindowView,
@@ -476,9 +476,11 @@ function planSegmentLabel(startsAt: number) {
 function DeviationPlanGauge({
   usedPercent,
   pace,
+  animateTransition,
 }: {
   usedPercent: number;
   pace: PaceWindowView | undefined;
+  animateTransition: boolean;
 }) {
   const plannedPercent = pace?.plannedUsedPercent;
   const delta = pace?.planDeltaPercentPoints;
@@ -490,7 +492,9 @@ function DeviationPlanGauge({
 
   if (!available) {
     return (
-      <div className="plan-visual">
+      <div
+        className={`plan-visual ${animateTransition ? "with-transition" : ""}`}
+      >
         <div className="plan-visual-heading">
           <span>계획 대비</span>
           <strong className="plan-visual-difference stage-near">
@@ -525,7 +529,9 @@ function DeviationPlanGauge({
   const direction = delta > 1 ? "over" : delta < -1 ? "under" : "near";
 
   return (
-    <div className="plan-visual">
+    <div
+      className={`plan-visual ${animateTransition ? "with-transition" : ""}`}
+    >
       <div className="plan-visual-heading">
         <span>계획 대비</span>
         <strong
@@ -583,10 +589,12 @@ function WeeklyAllocationGauge({
   usedPercent,
   pace,
   breakdown,
+  animateTransition,
 }: {
   usedPercent: number;
   pace: PaceWindowView;
   breakdown: PacePlanBreakdownView;
+  animateTransition: boolean;
 }) {
   const plannedPercent = pace.plannedUsedPercent!;
   const delta = pace.planDeltaPercentPoints!;
@@ -600,7 +608,9 @@ function WeeklyAllocationGauge({
   const currentLabel = planSegmentLabel(currentSegment.startsAt);
 
   return (
-    <div className="plan-visual">
+    <div
+      className={`plan-visual ${animateTransition ? "with-transition" : ""}`}
+    >
       <div className="plan-visual-heading">
         <span>주간 계획 배분</span>
         <strong
@@ -701,23 +711,43 @@ function PlanVisualization({
   visualization: LargePlanVisualization;
 }) {
   const breakdown = pace?.planBreakdown;
-  if (
+  const usesWeeklyAllocation =
     visualization === "weeklyAllocation" &&
     breakdown?.kind === "weekly" &&
     pace?.plannedUsedPercent !== null &&
     pace?.plannedUsedPercent !== undefined &&
     pace.planDeltaPercentPoints !== null &&
-    pace.planDeltaPercentPoints !== undefined
-  ) {
+    pace.planDeltaPercentPoints !== undefined;
+  const effectiveVisualization: LargePlanVisualization = usesWeeklyAllocation
+    ? "weeklyAllocation"
+    : "deviation";
+  const [animateTransitions, setAnimateTransitions] = useState(false);
+  const transitionMountedRef = useRef(false);
+  useEffect(() => {
+    if (!transitionMountedRef.current) {
+      transitionMountedRef.current = true;
+      return;
+    }
+    setAnimateTransitions(true);
+  }, [effectiveVisualization]);
+
+  if (usesWeeklyAllocation) {
     return (
       <WeeklyAllocationGauge
         usedPercent={usedPercent}
         pace={pace}
         breakdown={breakdown}
+        animateTransition={animateTransitions}
       />
     );
   }
-  return <DeviationPlanGauge usedPercent={usedPercent} pace={pace} />;
+  return (
+    <DeviationPlanGauge
+      usedPercent={usedPercent}
+      pace={pace}
+      animateTransition={animateTransitions}
+    />
+  );
 }
 
 function ForecastTimeline({
@@ -890,27 +920,33 @@ function App() {
   const [largePlanVisualization, setLargePlanVisualization] =
     useState<LargePlanVisualization>("deviation");
   const [opacity, setOpacity] = useState(DEFAULT_OVERLAY_OPACITY);
-  const [opacityPhase, setOpacityPhase] =
-    useState<OverlayOpacityPhase>("committed");
+  const [appearancePhase, setAppearancePhase] =
+    useState<OverlayAppearancePhase>("committed");
   const [sizeReady, setSizeReady] = useState(false);
   const draggingRef = useRef(false);
-  const lastOpacityUpdateIdRef = useRef(-1);
+  const lastAppearanceUpdateIdRef = useRef(-1);
 
-  const applyOpacityUpdate = useCallback((update: OverlayOpacityUpdate) => {
-    if (
-      !Number.isInteger(update.updateId) ||
-      update.updateId <= lastOpacityUpdateIdRef.current ||
-      !Number.isInteger(update.opacityPercent) ||
-      update.opacityPercent < MIN_OVERLAY_OPACITY ||
-      update.opacityPercent > 100 ||
-      !["preview", "committed", "reverted"].includes(update.phase)
-    ) {
-      return;
-    }
-    lastOpacityUpdateIdRef.current = update.updateId;
-    setOpacity(update.opacityPercent);
-    setOpacityPhase(update.phase);
-  }, []);
+  const applyAppearanceUpdate = useCallback(
+    (update: OverlayAppearanceUpdate) => {
+      const appearance = update?.appearance;
+      if (
+        !Number.isInteger(update?.updateId) ||
+        update.updateId <= lastAppearanceUpdateIdRef.current ||
+        !Number.isInteger(appearance?.overlayOpacity) ||
+        appearance.overlayOpacity < MIN_OVERLAY_OPACITY ||
+        appearance.overlayOpacity > 100 ||
+        !isLargePlanVisualization(appearance?.largePlanVisualization) ||
+        !["preview", "committed", "reverted"].includes(update?.phase)
+      ) {
+        return;
+      }
+      lastAppearanceUpdateIdRef.current = update.updateId;
+      setOpacity(appearance.overlayOpacity);
+      setLargePlanVisualization(appearance.largePlanVisualization);
+      setAppearancePhase(update.phase);
+    },
+    [],
+  );
 
   const startDragging = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
@@ -957,15 +993,8 @@ function App() {
       invoke<OverlaySize>("get_overlay_size").then((size) => {
         if (isOverlaySize(size)) setSizeMode(size);
       }),
-      invoke<LargePlanVisualization>("get_large_plan_visualization").then(
-        (visualization) => {
-          if (isLargePlanVisualization(visualization)) {
-            setLargePlanVisualization(visualization);
-          }
-        },
-      ),
-      invoke<OverlayOpacityUpdate>("get_effective_overlay_opacity").then(
-        applyOpacityUpdate,
+      invoke<OverlayAppearanceUpdate>("get_effective_overlay_appearance").then(
+        applyAppearanceUpdate,
       ),
     ]).finally(() => setSizeReady(true));
     const unlistenUsage = listen<UsageViewState>(
@@ -978,17 +1007,9 @@ function App() {
         if (isOverlaySize(event.payload)) setSizeMode(event.payload);
       },
     );
-    const unlistenOverlayOpacity = listen<OverlayOpacityUpdate>(
-      "ui://overlay-opacity-updated",
-      (event) => applyOpacityUpdate(event.payload),
-    );
-    const unlistenLargePlanVisualization = listen<LargePlanVisualization>(
-      "ui://large-plan-visualization-changed",
-      (event) => {
-        if (isLargePlanVisualization(event.payload)) {
-          setLargePlanVisualization(event.payload);
-        }
-      },
+    const unlistenOverlayAppearance = listen<OverlayAppearanceUpdate>(
+      "ui://overlay-appearance-updated",
+      (event) => applyAppearanceUpdate(event.payload),
     );
     const unlistenPace = listen<PaceViewState>(
       "pace://state-changed",
@@ -998,12 +1019,11 @@ function App() {
     return () => {
       void unlistenUsage.then((unlisten) => unlisten());
       void unlistenOverlaySize.then((unlisten) => unlisten());
-      void unlistenOverlayOpacity.then((unlisten) => unlisten());
-      void unlistenLargePlanVisualization.then((unlisten) => unlisten());
+      void unlistenOverlayAppearance.then((unlisten) => unlisten());
       void unlistenPace.then((unlisten) => unlisten());
       void unlistenPickCli.then((unlisten) => unlisten());
     };
-  }, [applyOpacityUpdate, chooseCli]);
+  }, [applyAppearanceUpdate, chooseCli]);
 
   useEffect(() => {
     if (!sizeReady) return;
@@ -1022,7 +1042,7 @@ function App() {
     <main
       className={`overlay size-${sizeMode} ${
         sizeReady ? "is-size-ready" : ""
-      } ${opacityPhase === "preview" ? "is-opacity-previewing" : ""}`}
+      } ${appearancePhase === "preview" ? "is-appearance-previewing" : ""}`}
       style={
         {
           "--overlay-opacity": opacity / 100,

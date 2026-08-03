@@ -90,11 +90,12 @@ function mockStartup(
     if (command === "get_usage_state") return Promise.resolve(usage);
     if (command === "get_pace_state") return Promise.resolve(pace);
     if (command === "get_overlay_size") return Promise.resolve(size);
-    if (command === "get_large_plan_visualization")
-      return Promise.resolve(largePlanVisualization);
-    if (command === "get_effective_overlay_opacity")
+    if (command === "get_effective_overlay_appearance")
       return Promise.resolve({
-        opacityPercent: 100,
+        appearance: {
+          overlayOpacity: 100,
+          largePlanVisualization,
+        },
         phase: "committed",
         updateId: 0,
       });
@@ -328,12 +329,27 @@ describe("Codex 사용량 오버레이", () => {
     ).toBeInTheDocument();
     expect(container.querySelectorAll(".allocation-track")).toHaveLength(1);
     expect(container.querySelectorAll(".deviation-track")).toHaveLength(1);
+    expect(
+      container.querySelector(".plan-visual.with-transition"),
+    ).not.toBeInTheDocument();
 
-    mocks.listeners.get("ui://large-plan-visualization-changed")?.({
-      payload: "deviation",
+    mocks.listeners.get("ui://overlay-appearance-updated")?.({
+      payload: {
+        appearance: {
+          overlayOpacity: 100,
+          largePlanVisualization: "deviation",
+        },
+        phase: "preview",
+        updateId: 1,
+      },
     });
     await waitFor(() =>
       expect(container.querySelectorAll(".deviation-track")).toHaveLength(2),
+    );
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll(".plan-visual.with-transition"),
+      ).toHaveLength(1),
     );
     expect(
       container.querySelector(".allocation-track"),
@@ -593,14 +609,17 @@ describe("Codex 사용량 오버레이", () => {
     ).toBeInTheDocument();
   });
 
-  it("최신 투명도 미리보기만 오버레이 전체에 반영한다", async () => {
+  it("최신 외형 미리보기만 투명도와 Large 표시 방식에 원자적으로 반영한다", async () => {
     mocks.invoke.mockImplementation((command: string) => {
       if (command === "get_usage_state") return Promise.resolve(weeklyOnly);
       if (command === "get_pace_state") return Promise.resolve(weeklyPace);
-      if (command === "get_overlay_size") return Promise.resolve("middle");
-      if (command === "get_effective_overlay_opacity")
+      if (command === "get_overlay_size") return Promise.resolve("large");
+      if (command === "get_effective_overlay_appearance")
         return Promise.resolve({
-          opacityPercent: 65,
+          appearance: {
+            overlayOpacity: 65,
+            largePlanVisualization: "deviation",
+          },
           phase: "committed",
           updateId: 4,
         });
@@ -612,9 +631,13 @@ describe("Codex 사용량 오버레이", () => {
     );
 
     expect(overlay).toHaveStyle({ "--overlay-opacity": "0.65" });
-    mocks.listeners.get("ui://overlay-opacity-updated")?.({
+    expect(screen.getByText("계획 대비")).toBeInTheDocument();
+    mocks.listeners.get("ui://overlay-appearance-updated")?.({
       payload: {
-        opacityPercent: 80,
+        appearance: {
+          overlayOpacity: 80,
+          largePlanVisualization: "weeklyAllocation",
+        },
         phase: "preview",
         updateId: 6,
       },
@@ -622,27 +645,71 @@ describe("Codex 사용량 오버레이", () => {
     await waitFor(() =>
       expect(overlay).toHaveStyle({ "--overlay-opacity": "0.8" }),
     );
-    expect(overlay).toHaveClass("is-opacity-previewing");
+    expect(await screen.findByText("주간 계획 배분")).toBeInTheDocument();
+    expect(overlay).toHaveClass("is-appearance-previewing");
 
-    mocks.listeners.get("ui://overlay-opacity-updated")?.({
+    mocks.listeners.get("ui://overlay-appearance-updated")?.({
       payload: {
-        opacityPercent: 40,
+        appearance: {
+          overlayOpacity: 40,
+          largePlanVisualization: "deviation",
+        },
         phase: "preview",
         updateId: 5,
       },
     });
     expect(overlay).toHaveStyle({ "--overlay-opacity": "0.8" });
+    expect(screen.getByText("주간 계획 배분")).toBeInTheDocument();
 
-    mocks.listeners.get("ui://overlay-opacity-updated")?.({
+    mocks.listeners.get("ui://overlay-appearance-updated")?.({
       payload: {
-        opacityPercent: 65,
+        appearance: {
+          overlayOpacity: 65,
+          largePlanVisualization: "unknown",
+        },
         phase: "reverted",
         updateId: 7,
       },
     });
+    expect(overlay).toHaveStyle({ "--overlay-opacity": "0.8" });
+    expect(screen.getByText("주간 계획 배분")).toBeInTheDocument();
+    expect(overlay).toHaveClass("is-appearance-previewing");
+
+    mocks.listeners.get("ui://overlay-appearance-updated")?.({
+      payload: {
+        appearance: {
+          overlayOpacity: 65,
+          largePlanVisualization: "deviation",
+        },
+        phase: "reverted",
+        updateId: 8,
+      },
+    });
     await waitFor(() =>
-      expect(overlay).not.toHaveClass("is-opacity-previewing"),
+      expect(overlay).not.toHaveClass("is-appearance-previewing"),
     );
+    expect(screen.getByText("계획 대비")).toBeInTheDocument();
+  });
+
+  it("Large 표시 미리보기는 middle 오버레이의 크기를 바꾸지 않는다", async () => {
+    render(<App />);
+    expect(await screen.findByText("주간")).toBeInTheDocument();
+
+    mocks.listeners.get("ui://overlay-appearance-updated")?.({
+      payload: {
+        appearance: {
+          overlayOpacity: 80,
+          largePlanVisualization: "weeklyAllocation",
+        },
+        phase: "preview",
+        updateId: 1,
+      },
+    });
+
+    expect(screen.getByText("74% 남음")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "Codex 페이스 예측" }),
+    ).not.toBeInTheDocument();
   });
 
   it("마지막 성공 값이 있으면 stale 상태를 지연 표시와 함께 유지한다", async () => {

@@ -90,11 +90,16 @@ export interface SettingsSession {
   settings: EditableSettings;
 }
 
-export type OverlayOpacityPhase = "preview" | "committed" | "reverted";
+export interface OverlayAppearance {
+  overlayOpacity: number;
+  largePlanVisualization: LargePlanVisualization;
+}
 
-export interface OverlayOpacityUpdate {
-  opacityPercent: number;
-  phase: OverlayOpacityPhase;
+export type OverlayAppearancePhase = "preview" | "committed" | "reverted";
+
+export interface OverlayAppearanceUpdate {
+  appearance: OverlayAppearance;
+  phase: OverlayAppearancePhase;
   updateId: number;
 }
 
