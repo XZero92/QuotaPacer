@@ -123,14 +123,34 @@ function EmptySurface({
   );
 }
 
+function plannedRemainingPercent(pace: PaceWindowView | undefined) {
+  if (
+    pace?.plannedUsedPercent === null ||
+    pace?.plannedUsedPercent === undefined ||
+    !Number.isFinite(pace.plannedUsedPercent)
+  ) {
+    return null;
+  }
+
+  return Math.max(0, Math.min(100, 100 - pace.plannedUsedPercent));
+}
+
 function SmallOverlay({
   usage,
   featured,
+  pace,
 }: {
   usage: UsageViewState;
   featured: UsageWindow | null;
+  pace: PaceWindowView | undefined;
 }) {
   if (!featured) return <EmptySurface usage={usage} compact />;
+
+  const plannedRemaining = plannedRemainingPercent(pace);
+  const planLabel =
+    plannedRemaining === null
+      ? ""
+      : `, 계획 기준 ${Math.round(plannedRemaining)}% 남음`;
 
   return (
     <div
@@ -144,10 +164,14 @@ function SmallOverlay({
         style={
           {
             "--remaining": featured.remainingPercent,
+            "--plan-remaining": plannedRemaining ?? 0,
           } as React.CSSProperties
         }
-        aria-label={`${featured.remainingPercent}% 남음 원형 게이지`}
+        aria-label={`${featured.remainingPercent}% 남음 원형 게이지${planLabel}`}
       >
+        {plannedRemaining !== null && (
+          <i className="small-plan-marker" aria-hidden="true" />
+        )}
         <strong>{featured.remainingPercent}%</strong>
       </div>
       <div className="small-copy">
@@ -167,11 +191,19 @@ function SmallOverlay({
 function MiddleOverlay({
   usage,
   featured,
+  pace,
 }: {
   usage: UsageViewState;
   featured: UsageWindow | null;
+  pace: PaceWindowView | undefined;
 }) {
   if (!featured) return <EmptySurface usage={usage} />;
+
+  const plannedRemaining = plannedRemainingPercent(pace);
+  const planLabel =
+    plannedRemaining === null
+      ? ""
+      : `, 계획 기준 ${Math.round(plannedRemaining)}% 남음`;
 
   return (
     <div className="middle-card">
@@ -183,12 +215,19 @@ function MiddleOverlay({
       </div>
       <div
         className="usage-meter"
-        aria-label={`${featured.remainingPercent}% 남음`}
+        aria-label={`${featured.remainingPercent}% 남음${planLabel}`}
       >
         <span
           className={`tone-${usageTone(featured.remainingPercent)}`}
           style={{ width: `${featured.remainingPercent}%` }}
         />
+        {plannedRemaining !== null && (
+          <i
+            className={`usage-plan-marker align-${markerAlignment(plannedRemaining)}`}
+            style={{ left: `${plannedRemaining}%` }}
+            aria-hidden="true"
+          />
+        )}
       </div>
       <small>
         {usage.connection === "stale"
@@ -975,6 +1014,9 @@ function App() {
   }, [sizeMode, sizeReady, usage.windows.length]);
 
   const featured = featuredWindow(usage);
+  const featuredPace = featured
+    ? pace.windows.find((window) => window.windowId === featured.id)
+    : undefined;
 
   return (
     <main
@@ -992,9 +1034,9 @@ function App() {
       title="드래그하여 이동 · 우클릭하여 메뉴 열기"
     >
       {sizeMode === "small" ? (
-        <SmallOverlay usage={usage} featured={featured} />
+        <SmallOverlay usage={usage} featured={featured} pace={featuredPace} />
       ) : sizeMode === "middle" ? (
-        <MiddleOverlay usage={usage} featured={featured} />
+        <MiddleOverlay usage={usage} featured={featured} pace={featuredPace} />
       ) : (
         <LargeOverlay
           usage={usage}

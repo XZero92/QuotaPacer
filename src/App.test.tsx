@@ -117,12 +117,18 @@ describe("Codex 사용량 오버레이", () => {
     render(<App />);
 
     const capsule = await screen.findByLabelText("Codex · 주간 제한 74% 남음");
-    const gauge = within(capsule).getByLabelText("74% 남음 원형 게이지");
+    const gauge = within(capsule).getByLabelText(
+      "74% 남음 원형 게이지, 계획 기준 57% 남음",
+    );
     expect(capsule).toHaveClass("small-card");
     expect(capsule).toHaveTextContent("Codex");
     expect(capsule).toHaveTextContent("주간");
     expect(gauge).toHaveTextContent("74%");
-    expect(gauge).toHaveStyle({ "--remaining": "74" });
+    expect(gauge).toHaveStyle({
+      "--remaining": "74",
+      "--plan-remaining": "57.1",
+    });
+    expect(gauge.querySelector(".small-plan-marker")).toBeInTheDocument();
     expect(screen.queryByText("5시간")).not.toBeInTheDocument();
   });
 
@@ -149,7 +155,11 @@ describe("Codex 사용량 오버레이", () => {
     expect(await screen.findByText("주간")).toBeInTheDocument();
     expect(screen.getByText("Codex")).toBeInTheDocument();
     expect(screen.getByText("74% 남음")).toBeInTheDocument();
-    expect(screen.getByLabelText("74% 남음")).toBeInTheDocument();
+    const meter = screen.getByLabelText("74% 남음, 계획 기준 57% 남음");
+    expect(meter).toBeInTheDocument();
+    expect(meter.querySelector(".usage-plan-marker")).toHaveStyle({
+      left: "57.1%",
+    });
     expect(screen.getByText(/리셋$/)).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "사용량 상세 펼치기" }),
@@ -182,13 +192,32 @@ describe("Codex 사용량 오버레이", () => {
       });
       render(<App />);
 
-      const meter = await screen.findByLabelText(`${remainingPercent}% 남음`);
+      const meter = await screen.findByLabelText(
+        `${remainingPercent}% 남음, 계획 기준 57% 남음`,
+      );
       const fill = meter.firstElementChild;
 
       expect(fill).toHaveClass(`tone-${tone}`);
       expect(getComputedStyle(fill!).getPropertyValue("--tone").trim()).toBe(
         `var(${token})`,
       );
+    },
+  );
+
+  it.each([
+    { size: "small" as const, marker: ".small-plan-marker" },
+    { size: "middle" as const, marker: ".usage-plan-marker" },
+  ])(
+    "$size은 계획 정보가 없으면 기준점을 생략한다",
+    async ({ size, marker }) => {
+      mockStartup(size, weeklyOnly, { windows: [], updatedAt: null });
+      render(<App />);
+
+      expect(await screen.findByText("주간")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(mocks.invoke).toHaveBeenCalledWith("get_pace_state");
+      });
+      expect(document.querySelector(marker)).not.toBeInTheDocument();
     },
   );
 
