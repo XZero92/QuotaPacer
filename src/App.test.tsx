@@ -119,7 +119,7 @@ describe("Codex 사용량 오버레이", () => {
 
     const capsule = await screen.findByLabelText("Codex · 주간 제한 74% 남음");
     const gauge = within(capsule).getByLabelText(
-      "74% 남음 원형 게이지, 계획 기준 57% 남음",
+      "74% 남음 원형 게이지, 현재 시각 계획 기준 57% 남음",
     );
     expect(capsule).toHaveClass("small-card");
     expect(capsule).toHaveTextContent("Codex");
@@ -156,7 +156,9 @@ describe("Codex 사용량 오버레이", () => {
     expect(await screen.findByText("주간")).toBeInTheDocument();
     expect(screen.getByText("Codex")).toBeInTheDocument();
     expect(screen.getByText("74% 남음")).toBeInTheDocument();
-    const meter = screen.getByLabelText("74% 남음, 계획 기준 57% 남음");
+    const meter = screen.getByLabelText(
+      "74% 남음, 현재 시각 계획 기준 57% 남음",
+    );
     expect(meter).toBeInTheDocument();
     expect(meter.querySelector(".usage-plan-marker")).toHaveStyle({
       left: "57.1%",
@@ -194,7 +196,7 @@ describe("Codex 사용량 오버레이", () => {
       render(<App />);
 
       const meter = await screen.findByLabelText(
-        `${remainingPercent}% 남음, 계획 기준 57% 남음`,
+        `${remainingPercent}% 남음, 현재 시각 계획 기준 57% 남음`,
       );
       const fill = meter.firstElementChild;
 
@@ -269,13 +271,22 @@ describe("Codex 사용량 오버레이", () => {
     expect(screen.getByText("초기화 시 52% 사용 예상")).toBeInTheDocument();
     expect(screen.getByText("45분 일찍 소진")).toBeInTheDocument();
     expect(screen.queryByText("초기화 전 소진 예상")).not.toBeInTheDocument();
-    expect(screen.getByText("기간 평균")).toBeInTheDocument();
+    expect(screen.getByText("누적 평균")).toBeInTheDocument();
     expect(screen.getByText("최근 8.3시간")).toBeInTheDocument();
     expect(
-      screen.getByLabelText(/계획상 17%p 여유.*표시 범위 ±20%p/),
+      screen.getByLabelText(
+        /현재 사용량 26%.*현재 시각 계획선 43%.*계획상 17%p 여유.*표시 범위 ±20%p/,
+      ),
     ).toBeInTheDocument();
     expect(
-      screen.getByLabelText(/소진 예상.*초기화.*45분 일찍 소진/),
+      screen.getByLabelText(
+        /소진 예상.*초기화.*최근 8.3시간의 평균 속도를 유지하면 초기화보다 45분 일찍 소진 예상/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText(
+        "누적 평균 속도를 유지하면 초기화 시 52% 사용 예상",
+      ),
     ).toBeInTheDocument();
     expect(screen.getByText("현재 26% · 계획선 43%")).toBeInTheDocument();
     expect(screen.getByText("주간")).toBeInTheDocument();
@@ -452,6 +463,11 @@ describe("Codex 사용량 오버레이", () => {
 
     expect(
       await screen.findByText(/초기 추정 · 2일 7시간 일찍 소진 가능/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText(
+        /초기 추정, 누적 평균 속도를 유지하면 초기화보다 2일 7시간 일찍 소진 가능/,
+      ),
     ).toBeInTheDocument();
     expect(container.querySelector(".status-earlyRisk")).toBeInTheDocument();
     expect(

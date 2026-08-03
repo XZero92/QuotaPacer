@@ -13,10 +13,11 @@ const SAMPLE_INTERVAL_SECONDS: i64 = 5 * 60;
 const HISTORY_RETENTION_SECONDS: i64 = 25 * 60 * 60;
 const RECENT_LOOKBACK_SECONDS: i64 = 24 * 60 * 60;
 const MIN_RECENT_OBSERVATION_SECONDS: i64 = 6 * 60 * 60;
+const WINDOW_RESET_TOLERANCE_SECONDS: i64 = 5 * 60;
+const ALERT_CONFIRMATION_INTERVAL_SECONDS: i64 = 60;
 const DAY_SECONDS: i64 = 24 * 60 * 60;
 const WEEK_MINUTES: i64 = 7 * 24 * 60;
 const PLAN_GRACE_PERCENT_POINTS: f64 = 1.0;
-const REQUIRED_ALERT_CONFIRMATIONS: u8 = 2;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -109,17 +110,18 @@ struct PaceHistoryFile {
     alerts: Vec<AlertRecord>,
 }
 
-#[derive(Clone, Debug, Default)]
-struct AlertStreak {
-    plan: u8,
-    exhaustion: u8,
+#[derive(Clone, Debug)]
+struct AlertConfirmationState {
+    representative_resets_at: i64,
+    plan_pending_since: Option<i64>,
+    exhaustion_pending_since: Option<i64>,
 }
 
 #[derive(Default)]
 struct PaceRuntime {
     history: PaceHistoryFile,
     view: PaceViewState,
-    streaks: HashMap<String, AlertStreak>,
+    alert_confirmations: HashMap<String, AlertConfirmationState>,
 }
 
 #[derive(Clone)]
@@ -176,6 +178,7 @@ impl PaceService {
                 return;
             };
             let mut history_changed = prune_history(&mut runtime.history, as_of);
+            history_changed |= coalesce_alert_records(&mut runtime.history);
             history_changed |= record_samples(&mut runtime.history, usage, as_of);
             let view = calculate_state(usage, &settings, &runtime.history.samples);
             let notifications = advance_alerts(
@@ -205,11 +208,27 @@ impl PaceService {
 
     pub fn recompute(&self, usage: &UsageViewState) {
         let settings = self.settings.pace_settings();
+        self.recompute_with_settings(usage, &settings);
+    }
+
+    pub fn settings_changed(
+        &self,
+        previous: &PaceSettings,
+        next: &PaceSettings,
+        usage: &UsageViewState,
+    ) {
+        if let Ok(mut runtime) = self.runtime.lock() {
+            reset_confirmations_for_settings_change(&mut runtime, previous, next);
+        }
+        self.recompute_with_settings(usage, next);
+    }
+
+    fn recompute_with_settings(&self, usage: &UsageViewState, settings: &PaceSettings) {
         let view = {
             let Ok(mut runtime) = self.runtime.lock() else {
                 return;
             };
-            let view = calculate_state(usage, &settings, &runtime.history.samples);
+            let view = calculate_state(usage, settings, &runtime.history.samples);
             runtime.view = view.clone();
             view
         };
@@ -223,7 +242,7 @@ impl PaceService {
                 .lock()
                 .map_err(|_| "페이스 이력을 잠글 수 없습니다.".to_string())?;
             runtime.history = PaceHistoryFile::default();
-            runtime.streaks.clear();
+            runtime.alert_confirmations.clear();
             self.save_history(&runtime.history)?;
         }
         self.recompute(usage);
@@ -242,6 +261,22 @@ impl PaceService {
     }
 }
 
+fn reset_confirmations_for_settings_change(
+    runtime: &mut PaceRuntime,
+    previous: &PaceSettings,
+    next: &PaceSettings,
+) {
+    if previous.os_notifications_enabled != next.os_notifications_enabled {
+        runtime.alert_confirmations.clear();
+    } else if previous.plan_mode != next.plan_mode
+        || previous.weekday_allocations != next.weekday_allocations
+    {
+        for confirmation in runtime.alert_confirmations.values_mut() {
+            confirmation.plan_pending_since = None;
+        }
+    }
+}
+
 fn prune_history(history: &mut PaceHistoryFile, as_of: i64) -> bool {
     let before_samples = history.samples.len();
     let before_alerts = history.alerts.len();
@@ -253,6 +288,38 @@ fn prune_history(history: &mut PaceHistoryFile, as_of: i64) -> bool {
     before_samples != history.samples.len() || before_alerts != history.alerts.len()
 }
 
+fn same_window_generation(
+    left_window_id: &str,
+    left_resets_at: i64,
+    right_window_id: &str,
+    right_resets_at: i64,
+) -> bool {
+    left_window_id == right_window_id
+        && left_resets_at.abs_diff(right_resets_at) <= WINDOW_RESET_TOLERANCE_SECONDS as u64
+}
+
+fn coalesce_alert_records(history: &mut PaceHistoryFile) -> bool {
+    let before = history.alerts.len();
+    let mut merged: Vec<AlertRecord> = Vec::with_capacity(before);
+    for alert in history.alerts.drain(..) {
+        if let Some(existing) = merged.iter_mut().find(|existing| {
+            same_window_generation(
+                &existing.window_id,
+                existing.resets_at,
+                &alert.window_id,
+                alert.resets_at,
+            )
+        }) {
+            existing.plan_notified |= alert.plan_notified;
+            existing.exhaustion_notified |= alert.exhaustion_notified;
+        } else {
+            merged.push(alert);
+        }
+    }
+    history.alerts = merged;
+    history.alerts.len() != before
+}
+
 fn record_samples(history: &mut PaceHistoryFile, usage: &UsageViewState, as_of: i64) -> bool {
     let mut changed = false;
     for window in &usage.windows {
@@ -262,7 +329,9 @@ fn record_samples(history: &mut PaceHistoryFile, usage: &UsageViewState, as_of: 
         let last_recorded = history
             .samples
             .iter()
-            .filter(|sample| sample.window_id == window.id && sample.resets_at == resets_at)
+            .filter(|sample| {
+                same_window_generation(&sample.window_id, sample.resets_at, &window.id, resets_at)
+            })
             .map(|sample| sample.recorded_at)
             .max();
         if last_recorded
@@ -385,8 +454,7 @@ fn recent_forecast(
     let sample = samples
         .iter()
         .filter(|sample| {
-            sample.window_id == window.id
-                && sample.resets_at == resets_at
+            same_window_generation(&sample.window_id, sample.resets_at, &window.id, resets_at)
                 && sample.recorded_at >= cutoff
                 && sample.recorded_at < as_of
                 && as_of - sample.recorded_at >= MIN_RECENT_OBSERVATION_SECONDS
@@ -489,10 +557,10 @@ fn planned_used_percent(
     let segment = ((as_of - starts_at) / DAY_SECONDS).clamp(0, 6) as usize;
     let start_weekday = start_weekday_override.unwrap_or_else(|| local_weekday_index(starts_at));
     let allocations = weekly_allocations(settings, start_weekday);
+    let elapsed_in_segment = (as_of - starts_at) % DAY_SECONDS;
+    let segment_progress = elapsed_in_segment as f64 / DAY_SECONDS as f64;
     Some(
-        allocations[..=segment]
-            .iter()
-            .sum::<f64>()
+        (allocations[..segment].iter().sum::<f64>() + allocations[segment] * segment_progress)
             .clamp(0.0, 100.0),
     )
 }
@@ -558,30 +626,58 @@ fn advance_alerts(
     if usage.connection == ConnectionState::Stale {
         return Vec::new();
     }
+    if !notifications_enabled {
+        runtime.alert_confirmations.clear();
+        return Vec::new();
+    }
+    let Some(observed_at) = usage.fetched_at else {
+        return Vec::new();
+    };
     let mut notifications = Vec::new();
     for (window, pace) in usage.windows.iter().zip(&view.windows) {
         let Some(resets_at) = window.resets_at else {
             continue;
         };
-        let key = format!("{}:{resets_at}", window.id);
-        let streak = runtime.streaks.entry(key).or_default();
         let plan_candidate = pace
             .plan_delta_percent_points
             .map(|delta| delta > PLAN_GRACE_PERCENT_POINTS)
             .unwrap_or(false);
         let exhaustion_candidate =
             pace.status == PaceStatus::ExhaustionRisk && !pace.early_estimate;
-        streak.plan = next_streak(streak.plan, plan_candidate);
-        streak.exhaustion = next_streak(streak.exhaustion, exhaustion_candidate);
-
-        if !notifications_enabled {
-            continue;
+        let confirmation = runtime
+            .alert_confirmations
+            .entry(window.id.clone())
+            .or_insert_with(|| AlertConfirmationState {
+                representative_resets_at: resets_at,
+                plan_pending_since: None,
+                exhaustion_pending_since: None,
+            });
+        if confirmation.representative_resets_at.abs_diff(resets_at)
+            > WINDOW_RESET_TOLERANCE_SECONDS as u64
+        {
+            *confirmation = AlertConfirmationState {
+                representative_resets_at: resets_at,
+                plan_pending_since: None,
+                exhaustion_pending_since: None,
+            };
         }
+        let plan_confirmed = confirm_alert_candidate(
+            &mut confirmation.plan_pending_since,
+            plan_candidate,
+            observed_at,
+        );
+        let exhaustion_confirmed = confirm_alert_candidate(
+            &mut confirmation.exhaustion_pending_since,
+            exhaustion_candidate,
+            observed_at,
+        );
         let alert_index = runtime
             .history
             .alerts
             .iter()
-            .position(|alert| alert.window_id == window.id && alert.resets_at == resets_at)
+            .position(|alert| {
+                same_window_generation(&alert.window_id, alert.resets_at, &window.id, resets_at)
+            })
             .unwrap_or_else(|| {
                 runtime.history.alerts.push(AlertRecord {
                     window_id: window.id.clone(),
@@ -591,9 +687,8 @@ fn advance_alerts(
                 runtime.history.alerts.len() - 1
             });
         let alert = &mut runtime.history.alerts[alert_index];
-        let notify_plan = streak.plan >= REQUIRED_ALERT_CONFIRMATIONS && !alert.plan_notified;
-        let notify_exhaustion =
-            streak.exhaustion >= REQUIRED_ALERT_CONFIRMATIONS && !alert.exhaustion_notified;
+        let notify_plan = plan_confirmed && !alert.plan_notified;
+        let notify_exhaustion = exhaustion_confirmed && !alert.exhaustion_notified;
         if !notify_plan && !notify_exhaustion {
             continue;
         }
@@ -629,11 +724,24 @@ fn advance_alerts(
     notifications
 }
 
-fn next_streak(current: u8, candidate: bool) -> u8 {
-    if candidate {
-        current.saturating_add(1)
-    } else {
-        0
+fn confirm_alert_candidate(
+    pending_since: &mut Option<i64>,
+    candidate: bool,
+    observed_at: i64,
+) -> bool {
+    if !candidate {
+        *pending_since = None;
+        return false;
+    }
+    match *pending_since {
+        Some(started_at) => {
+            observed_at > started_at
+                && observed_at - started_at >= ALERT_CONFIRMATION_INTERVAL_SECONDS
+        }
+        None => {
+            *pending_since = Some(observed_at);
+            false
+        }
     }
 }
 
@@ -736,7 +844,7 @@ mod tests {
             },
             PaceSample {
                 window_id: window.id.clone(),
-                resets_at: resets_at - 1,
+                resets_at: resets_at - WINDOW_RESET_TOLERANCE_SECONDS - 1,
                 recorded_at: as_of - RECENT_LOOKBACK_SECONDS,
                 used_percent: 1,
             },
@@ -816,6 +924,78 @@ mod tests {
     }
 
     #[test]
+    fn window_generation_uses_an_inclusive_five_minute_tolerance_without_chaining() {
+        assert!(same_window_generation("weekly", 1_000, "weekly", 1_300));
+        assert!(!same_window_generation("weekly", 1_000, "weekly", 1_301));
+        assert!(!same_window_generation("weekly", 1_000, "other", 1_000));
+
+        let mut history = PaceHistoryFile {
+            samples: vec![],
+            alerts: vec![
+                AlertRecord {
+                    window_id: "weekly".to_string(),
+                    resets_at: 1_000,
+                    plan_notified: true,
+                    exhaustion_notified: false,
+                },
+                AlertRecord {
+                    window_id: "weekly".to_string(),
+                    resets_at: 1_300,
+                    plan_notified: false,
+                    exhaustion_notified: true,
+                },
+                AlertRecord {
+                    window_id: "weekly".to_string(),
+                    resets_at: 1_600,
+                    plan_notified: false,
+                    exhaustion_notified: false,
+                },
+            ],
+        };
+        assert!(coalesce_alert_records(&mut history));
+        assert_eq!(history.alerts.len(), 2);
+        assert!(history.alerts[0].plan_notified);
+        assert!(history.alerts[0].exhaustion_notified);
+        assert_eq!(history.alerts[1].resets_at, 1_600);
+    }
+
+    #[test]
+    fn sample_interval_and_recent_forecast_accept_small_reset_jitter() {
+        let resets_at = 7 * DAY_SECONDS;
+        let as_of = 4 * DAY_SECONDS;
+        let window = weekly_window(30, resets_at);
+        let mut history = PaceHistoryFile {
+            samples: vec![PaceSample {
+                window_id: window.id.clone(),
+                resets_at: resets_at - WINDOW_RESET_TOLERANCE_SECONDS,
+                recorded_at: as_of - MIN_RECENT_OBSERVATION_SECONDS,
+                used_percent: 20,
+            }],
+            alerts: vec![],
+        };
+
+        let pace = calculate_window(
+            &window,
+            as_of,
+            &PaceSettings::default(),
+            &history.samples,
+            Some(0),
+        );
+        assert_eq!(pace.forecast_basis, ForecastBasis::Recent);
+        assert_eq!(pace.observed_hours, Some(6.0));
+        assert_eq!(pace.projected_end_percent, Some(150.0));
+
+        let first_usage = usage(window.clone(), as_of - MIN_RECENT_OBSERVATION_SECONDS + 60);
+        assert!(!record_samples(
+            &mut history,
+            &first_usage,
+            as_of - MIN_RECENT_OBSERVATION_SECONDS + 60
+        ));
+        let later = as_of - MIN_RECENT_OBSERVATION_SECONDS + SAMPLE_INTERVAL_SECONDS;
+        assert!(record_samples(&mut history, &usage(window, later), later));
+    }
+
+    #[test]
     fn missing_duration_and_reset_leave_the_forecast_unavailable() {
         let window = UsageWindow {
             window_duration_mins: None,
@@ -852,7 +1032,9 @@ mod tests {
         assert_eq!(view.windows[0].status, PaceStatus::PlanExceeded);
         assert!(view.windows[0].projected_end_percent.is_none());
         assert!(advance_alerts(&mut runtime, &usage, &view, true).is_empty());
-        let notifications = advance_alerts(&mut runtime, &usage, &view, true);
+        let mut confirmed_usage = usage.clone();
+        confirmed_usage.fetched_at = Some(as_of + ALERT_CONFIRMATION_INTERVAL_SECONDS);
+        let notifications = advance_alerts(&mut runtime, &confirmed_usage, &view, true);
         assert_eq!(notifications.len(), 1);
         assert!(notifications[0].title.contains("사용 계획 초과"));
         assert!(runtime.history.alerts[0].plan_notified);
@@ -893,15 +1075,31 @@ mod tests {
     }
 
     #[test]
-    fn even_weekly_plan_unlocks_one_daily_allocation_at_each_boundary() {
+    fn even_weekly_plan_interpolates_each_reset_aligned_day() {
         let resets_at = 7 * DAY_SECONDS;
         let window = weekly_window(0, resets_at);
         let settings = PaceSettings::default();
 
         let first = planned_used_percent(&window, 0, &settings, Some(0)).unwrap();
+        let first_midpoint =
+            planned_used_percent(&window, DAY_SECONDS / 2, &settings, Some(0)).unwrap();
+        let second = planned_used_percent(&window, DAY_SECONDS, &settings, Some(0)).unwrap();
         let third = planned_used_percent(&window, 2 * DAY_SECONDS, &settings, Some(0)).unwrap();
-        assert!((first - 100.0 / 7.0).abs() < 0.001);
-        assert!((third - 300.0 / 7.0).abs() < 0.001);
+        let end = planned_used_percent(&window, resets_at, &settings, Some(0)).unwrap();
+        assert_eq!(first, 0.0);
+        assert!((first_midpoint - 50.0 / 7.0).abs() < 0.001);
+        assert!((second - 100.0 / 7.0).abs() < 0.001);
+        assert!((third - 200.0 / 7.0).abs() < 0.001);
+        assert_eq!(end, 100.0);
+    }
+
+    #[test]
+    fn even_weekly_plan_matches_the_current_real_world_case() {
+        let resets_at = 7 * DAY_SECONDS;
+        let window = weekly_window(25, resets_at);
+        let planned =
+            planned_used_percent(&window, 132_543, &PaceSettings::default(), Some(0)).unwrap();
+        assert!((planned - 21.915_178_571_428_6).abs() < 0.000_001);
     }
 
     #[test]
@@ -944,9 +1142,32 @@ mod tests {
         };
 
         let first = planned_used_percent(&window, 0, &settings, Some(2)).unwrap();
+        let first_midpoint =
+            planned_used_percent(&window, DAY_SECONDS / 2, &settings, Some(2)).unwrap();
         let second = planned_used_percent(&window, DAY_SECONDS, &settings, Some(2)).unwrap();
-        assert_eq!(first, 20.0);
-        assert_eq!(second, 30.0);
+        assert_eq!(first, 0.0);
+        assert_eq!(first_midpoint, 10.0);
+        assert_eq!(second, 20.0);
+    }
+
+    #[test]
+    fn zero_allocation_keeps_the_weekly_plan_flat_for_that_segment() {
+        let resets_at = 7 * DAY_SECONDS;
+        let window = weekly_window(20, resets_at);
+        let settings = PaceSettings {
+            plan_mode: PacePlanMode::Weekday,
+            weekday_allocations: [20.0, 0.0, 20.0, 20.0, 20.0, 10.0, 10.0],
+            os_notifications_enabled: false,
+        };
+
+        let start = planned_used_percent(&window, DAY_SECONDS, &settings, Some(0)).unwrap();
+        let midpoint =
+            planned_used_percent(&window, DAY_SECONDS + DAY_SECONDS / 2, &settings, Some(0))
+                .unwrap();
+        let end = planned_used_percent(&window, 2 * DAY_SECONDS, &settings, Some(0)).unwrap();
+        assert_eq!(start, 20.0);
+        assert_eq!(midpoint, 20.0);
+        assert_eq!(end, 20.0);
     }
 
     #[test]
@@ -971,10 +1192,96 @@ mod tests {
         let mut runtime = PaceRuntime::default();
 
         assert!(advance_alerts(&mut runtime, &usage, &view, true).is_empty());
-        assert_eq!(advance_alerts(&mut runtime, &usage, &view, true).len(), 1);
-        assert!(advance_alerts(&mut runtime, &usage, &view, true).is_empty());
+        let mut too_soon = usage.clone();
+        too_soon.fetched_at = Some(as_of + ALERT_CONFIRMATION_INTERVAL_SECONDS - 1);
+        assert!(advance_alerts(&mut runtime, &too_soon, &view, true).is_empty());
+        let mut confirmed_usage = usage.clone();
+        confirmed_usage.fetched_at = Some(as_of + ALERT_CONFIRMATION_INTERVAL_SECONDS);
+        assert_eq!(
+            advance_alerts(&mut runtime, &confirmed_usage, &view, true).len(),
+            1
+        );
+        assert!(advance_alerts(&mut runtime, &confirmed_usage, &view, true).is_empty());
         assert!(runtime.history.alerts[0].plan_notified);
         assert!(runtime.history.alerts[0].exhaustion_notified);
+    }
+
+    #[test]
+    fn safe_observation_cancels_pending_alert_confirmation() {
+        let resets_at = 7 * DAY_SECONDS;
+        let as_of = 3 * DAY_SECONDS;
+        let usage = usage(weekly_window(60, resets_at), as_of);
+        let risk_view = calculate_state(&usage, &PaceSettings::default(), &[]);
+        let mut safe_view = risk_view.clone();
+        safe_view.windows[0].status = PaceStatus::Safe;
+        safe_view.windows[0].plan_delta_percent_points = Some(0.0);
+        safe_view.windows[0].projected_exhaustion_at = None;
+        let mut runtime = PaceRuntime::default();
+
+        assert!(advance_alerts(&mut runtime, &usage, &risk_view, true).is_empty());
+        let mut safe_usage = usage.clone();
+        safe_usage.fetched_at = Some(as_of + 30);
+        assert!(advance_alerts(&mut runtime, &safe_usage, &safe_view, true).is_empty());
+        let mut risk_again = usage.clone();
+        risk_again.fetched_at = Some(as_of + 60);
+        assert!(advance_alerts(&mut runtime, &risk_again, &risk_view, true).is_empty());
+        risk_again.fetched_at = Some(as_of + 120);
+        assert_eq!(
+            advance_alerts(&mut runtime, &risk_again, &risk_view, true).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_new_window_generation_restarts_alert_confirmation() {
+        let resets_at = 7 * DAY_SECONDS;
+        let as_of = 3 * DAY_SECONDS;
+        let usage = usage(weekly_window(60, resets_at), as_of);
+        let view = calculate_state(&usage, &PaceSettings::default(), &[]);
+        let mut runtime = PaceRuntime::default();
+
+        assert!(advance_alerts(&mut runtime, &usage, &view, true).is_empty());
+        let mut new_generation = usage.clone();
+        new_generation.windows[0].resets_at = Some(resets_at + WINDOW_RESET_TOLERANCE_SECONDS + 1);
+        new_generation.fetched_at = Some(as_of + ALERT_CONFIRMATION_INTERVAL_SECONDS);
+        assert!(advance_alerts(&mut runtime, &new_generation, &view, true).is_empty());
+        new_generation.fetched_at = Some(as_of + 2 * ALERT_CONFIRMATION_INTERVAL_SECONDS);
+        assert_eq!(
+            advance_alerts(&mut runtime, &new_generation, &view, true).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn notification_toggle_and_plan_changes_reset_only_the_intended_pending_state() {
+        let previous = PaceSettings {
+            os_notifications_enabled: true,
+            ..PaceSettings::default()
+        };
+        let mut runtime = PaceRuntime::default();
+        runtime.alert_confirmations.insert(
+            "codex:weekly".to_string(),
+            AlertConfirmationState {
+                representative_resets_at: 1_000,
+                plan_pending_since: Some(100),
+                exhaustion_pending_since: Some(100),
+            },
+        );
+        let mut changed_plan = previous.clone();
+        changed_plan.plan_mode = PacePlanMode::Weekday;
+        reset_confirmations_for_settings_change(&mut runtime, &previous, &changed_plan);
+        let confirmation = &runtime.alert_confirmations["codex:weekly"];
+        assert_eq!(confirmation.plan_pending_since, None);
+        assert_eq!(confirmation.exhaustion_pending_since, Some(100));
+
+        let mut notifications_disabled = changed_plan.clone();
+        notifications_disabled.os_notifications_enabled = false;
+        reset_confirmations_for_settings_change(
+            &mut runtime,
+            &changed_plan,
+            &notifications_disabled,
+        );
+        assert!(runtime.alert_confirmations.is_empty());
     }
 
     #[test]
@@ -988,7 +1295,9 @@ mod tests {
         assert!(view.windows[0].early_estimate);
         assert_eq!(view.windows[0].status, PaceStatus::ExhaustionRisk);
         assert!(advance_alerts(&mut runtime, &usage, &view, true).is_empty());
-        assert!(advance_alerts(&mut runtime, &usage, &view, true).is_empty());
+        let mut later_usage = usage.clone();
+        later_usage.fetched_at = Some(as_of + ALERT_CONFIRMATION_INTERVAL_SECONDS);
+        assert!(advance_alerts(&mut runtime, &later_usage, &view, true).is_empty());
         assert!(!runtime.history.alerts[0].exhaustion_notified);
     }
 
@@ -1004,20 +1313,24 @@ mod tests {
         let mut runtime = PaceRuntime::default();
 
         assert!(advance_alerts(&mut runtime, &usage, &view, true).is_empty());
-        let plan = advance_alerts(&mut runtime, &usage, &view, true);
+        let mut later_usage = usage.clone();
+        later_usage.fetched_at = Some(as_of + ALERT_CONFIRMATION_INTERVAL_SECONDS);
+        let plan = advance_alerts(&mut runtime, &later_usage, &view, true);
         assert_eq!(plan.len(), 1);
         assert!(plan[0].title.contains("사용 계획 초과"));
 
         view.windows[0].status = PaceStatus::ExhaustionRisk;
         view.windows[0].projected_exhaustion_at = Some(resets_at - 60);
-        assert!(advance_alerts(&mut runtime, &usage, &view, true).is_empty());
-        let exhaustion = advance_alerts(&mut runtime, &usage, &view, true);
+        later_usage.fetched_at = Some(as_of + 2 * ALERT_CONFIRMATION_INTERVAL_SECONDS);
+        assert!(advance_alerts(&mut runtime, &later_usage, &view, true).is_empty());
+        later_usage.fetched_at = Some(as_of + 3 * ALERT_CONFIRMATION_INTERVAL_SECONDS);
+        let exhaustion = advance_alerts(&mut runtime, &later_usage, &view, true);
         assert_eq!(exhaustion.len(), 1);
         assert!(exhaustion[0].title.contains("초기화 전 소진 예상"));
         assert!(exhaustion[0]
             .body
             .contains("초기화보다 약 1분 먼저 소진 예상"));
-        assert!(advance_alerts(&mut runtime, &usage, &view, true).is_empty());
+        assert!(advance_alerts(&mut runtime, &later_usage, &view, true).is_empty());
     }
 
     #[test]
@@ -1042,6 +1355,6 @@ mod tests {
 
         assert!(advance_alerts(&mut runtime, &usage, &view, true).is_empty());
         assert!(advance_alerts(&mut runtime, &usage, &view, true).is_empty());
-        assert!(runtime.streaks.is_empty());
+        assert!(runtime.alert_confirmations.is_empty());
     }
 }

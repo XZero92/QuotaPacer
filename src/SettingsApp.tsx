@@ -451,7 +451,7 @@ function SettingsApp() {
     setMessage("");
     try {
       await invoke("clear_pace_history");
-      setMessage("최근 페이스 이력을 삭제했습니다.");
+      setMessage("최근 페이스 이력과 알림 상태를 삭제했습니다.");
     } catch (error) {
       setMessage(String(error));
     } finally {
@@ -695,8 +695,8 @@ function SettingsApp() {
             <div>
               <h2>최근 이력</h2>
               <p className="section-help">
-                사용률·시각·창 식별자만 최대 25시간 보존하며 계정 정보는
-                저장하지 않습니다.
+                최근 사용률 이력과 알림 중복 방지 상태를 최대 25시간
+                보존합니다. 계정 정보는 저장하지 않습니다.
               </p>
             </div>
             <button

@@ -135,6 +135,10 @@ function plannedRemainingPercent(pace: PaceWindowView | undefined) {
   return Math.max(0, Math.min(100, 100 - pace.plannedUsedPercent));
 }
 
+function observedHoursLabel(pace: PaceWindowView) {
+  return Math.round((pace.observedHours ?? 0) * 10) / 10;
+}
+
 function SmallOverlay({
   usage,
   featured,
@@ -150,7 +154,7 @@ function SmallOverlay({
   const planLabel =
     plannedRemaining === null
       ? ""
-      : `, 계획 기준 ${Math.round(plannedRemaining)}% 남음`;
+      : `, 현재 시각 계획 기준 ${Math.round(plannedRemaining)}% 남음`;
 
   return (
     <div
@@ -203,7 +207,7 @@ function MiddleOverlay({
   const planLabel =
     plannedRemaining === null
       ? ""
-      : `, 계획 기준 ${Math.round(plannedRemaining)}% 남음`;
+      : `, 현재 시각 계획 기준 ${Math.round(plannedRemaining)}% 남음`;
 
   return (
     <div className="middle-card">
@@ -309,9 +313,17 @@ function paceSummaryLabel(
 function forecastBasisLabel(pace: PaceWindowView | undefined) {
   if (!pace || pace.forecastBasis === "unavailable") return null;
   if (pace.forecastBasis === "recent") {
-    return `최근 ${Math.round((pace.observedHours ?? 0) * 10) / 10}시간`;
+    return `최근 ${observedHoursLabel(pace)}시간`;
   }
-  return "기간 평균";
+  return "누적 평균";
+}
+
+function forecastBasisDescription(pace: PaceWindowView | undefined) {
+  if (!pace || pace.forecastBasis === "unavailable") return null;
+  if (pace.forecastBasis === "recent") {
+    return `최근 ${observedHoursLabel(pace)}시간의 평균 속도`;
+  }
+  return "누적 평균 속도";
 }
 
 function formatLeadDuration(seconds: number) {
@@ -349,6 +361,7 @@ function formatPlanDifference(delta: number) {
 
 function planColorStage(
   delta: number,
+  plannedPercent: number,
   breakdown: PacePlanBreakdownView | null | undefined,
 ): PlanColorStage {
   if (delta < -1) return "reserve";
@@ -357,12 +370,7 @@ function planColorStage(
 
   let remaining = delta;
   let borrowedSegments = 0;
-  for (
-    let index = breakdown.currentSegmentIndex + 1;
-    index < breakdown.segments.length;
-    index += 1
-  ) {
-    const allocation = breakdown.segments[index].allocationPercent;
+  for (const allocation of futurePlanAllocations(plannedPercent, breakdown)) {
     if (allocation <= 0) continue;
     borrowedSegments += 1;
     if (remaining <= allocation) break;
@@ -380,7 +388,7 @@ function planColorStageLabel(stage: PlanColorStage) {
     case "near":
       return "계획 범위";
     case "borrow1":
-      return "다음 계획 구간 사용";
+      return "가까운 미래 계획 사용";
     case "borrow2":
       return "두 번째 미래 구간 사용";
     case "borrow3":
@@ -389,6 +397,7 @@ function planColorStageLabel(stage: PlanColorStage) {
 }
 
 function deviationStageBands(
+  plannedPercent: number,
   breakdown: PacePlanBreakdownView | null | undefined,
 ) {
   if (!breakdown) return [];
@@ -401,15 +410,11 @@ function deviationStageBands(
   let cumulative = 0;
   let borrowedSegments = 0;
 
-  for (
-    let index = breakdown.currentSegmentIndex + 1;
-    index < breakdown.segments.length && cumulative < PLAN_DEVIATION_RANGE;
-    index += 1
-  ) {
-    const allocation = breakdown.segments[index].allocationPercent;
+  for (const allocation of futurePlanAllocations(plannedPercent, breakdown)) {
+    if (cumulative >= PLAN_DEVIATION_RANGE) break;
     if (allocation <= 0) continue;
     borrowedSegments += 1;
-    const start = borrowedSegments === 1 ? 1 : cumulative;
+    const start = Math.max(1, cumulative);
     cumulative += allocation;
     const end = Math.min(cumulative, PLAN_DEVIATION_RANGE);
     if (end <= start) continue;
@@ -428,6 +433,24 @@ function deviationStageBands(
   return bands;
 }
 
+function futurePlanAllocations(
+  plannedPercent: number,
+  breakdown: PacePlanBreakdownView,
+) {
+  const currentSegment = breakdown.segments[breakdown.currentSegmentIndex];
+  if (!currentSegment) return [];
+  const currentRemaining = Math.max(
+    0,
+    currentSegment.cumulativePercent - plannedPercent,
+  );
+  return [
+    currentRemaining,
+    ...breakdown.segments
+      .slice(breakdown.currentSegmentIndex + 1)
+      .map((segment) => segment.allocationPercent),
+  ];
+}
+
 function allocationOverrunPieces(
   usedPercent: number,
   plannedUsedPercent: number,
@@ -442,12 +465,11 @@ function allocationOverrunPieces(
   let remaining = Math.max(0, usedPercent - plannedUsedPercent);
   let borrowedSegments = 0;
 
-  for (
-    let index = breakdown.currentSegmentIndex + 1;
-    index < breakdown.segments.length && remaining > 0;
-    index += 1
-  ) {
-    const allocation = breakdown.segments[index].allocationPercent;
+  for (const allocation of futurePlanAllocations(
+    plannedUsedPercent,
+    breakdown,
+  )) {
+    if (remaining <= 0) break;
     if (allocation <= 0) continue;
     borrowedSegments += 1;
     const width = Math.min(allocation, remaining);
@@ -524,8 +546,15 @@ function DeviationPlanGauge({
   const markerPercent = 50 + normalized * 50;
   const nearPlanWidth = (1 / PLAN_DEVIATION_RANGE) * 100;
   const clipped = Math.abs(delta) > PLAN_DEVIATION_RANGE;
-  const colorStage = planColorStage(delta, pace?.planBreakdown);
-  const stageBands = deviationStageBands(pace?.planBreakdown);
+  const colorStage = planColorStage(
+    delta,
+    plannedPercent,
+    pace?.planBreakdown,
+  );
+  const stageBands = deviationStageBands(
+    plannedPercent,
+    pace?.planBreakdown,
+  );
   const direction = delta > 1 ? "over" : delta < -1 ? "under" : "near";
 
   return (
@@ -548,7 +577,7 @@ function DeviationPlanGauge({
       <div
         className="deviation-track"
         role="img"
-        aria-label={`${formatPlanDifference(delta)}, ${planColorStageLabel(colorStage)}, 표시 범위 ±${PLAN_DEVIATION_RANGE}%p`}
+        aria-label={`현재 사용량 ${Math.round(usedPercent)}%, 현재 시각 계획선 ${Math.round(plannedPercent)}%, ${formatPlanDifference(delta)}, ${planColorStageLabel(colorStage)}, 표시 범위 ±${PLAN_DEVIATION_RANGE}%p`}
       >
         {stageBands.map((band, index) => (
           <span
@@ -598,7 +627,7 @@ function WeeklyAllocationGauge({
 }) {
   const plannedPercent = pace.plannedUsedPercent!;
   const delta = pace.planDeltaPercentPoints!;
-  const colorStage = planColorStage(delta, breakdown);
+  const colorStage = planColorStage(delta, plannedPercent, breakdown);
   const overrunPieces = allocationOverrunPieces(
     usedPercent,
     plannedPercent,
@@ -639,9 +668,9 @@ function WeeklyAllocationGauge({
       <div
         className="allocation-track"
         role="img"
-        aria-label={`요일별 계획 배분, ${currentLabel} 시작 구간까지 ${Math.round(
+        aria-label={`요일별 계획 배분, 현재 시각 계획선 ${Math.round(
           plannedPercent,
-        )}%, 현재 ${Math.round(usedPercent)}%, ${formatPlanDifference(
+        )}%, 현재 사용량 ${Math.round(usedPercent)}%, ${currentLabel} 시작 구간, ${formatPlanDifference(
           delta,
         )}, ${planColorStageLabel(colorStage)}`}
       >
@@ -782,18 +811,22 @@ function ForecastTimeline({
     exhaustionAt !== null && resetsAt !== null && exhaustionAt === resetsAt
       ? 100
       : pace?.projectedEndPercent;
+  const basisDescription = forecastBasisDescription(pace);
 
   let accessibleDetail = "사용 기록이 더 필요합니다";
-  if (isRisk) {
-    accessibleDetail = `${formatLeadDuration(
-      resetsAt - exhaustionAt,
-    )} 일찍 소진`;
+  if (isRisk && basisDescription !== null) {
+    const consequence =
+      status === "earlyRisk"
+        ? `${formatLeadDuration(resetsAt - exhaustionAt)} 일찍 소진 가능`
+        : `${formatLeadDuration(resetsAt - exhaustionAt)} 일찍 소진 예상`;
+    accessibleDetail = `${status === "earlyRisk" ? "초기 추정, " : ""}${basisDescription}를 유지하면 초기화보다 ${consequence}`;
   } else if (
     status !== "unavailable" &&
+    basisDescription !== null &&
     projectedEndPercent !== null &&
     projectedEndPercent !== undefined
   ) {
-    accessibleDetail = `초기화 시 ${Math.round(projectedEndPercent)}% 사용 예상`;
+    accessibleDetail = `${basisDescription}를 유지하면 초기화 시 ${Math.round(projectedEndPercent)}% 사용 예상`;
   }
 
   const timelineLabel = isRisk

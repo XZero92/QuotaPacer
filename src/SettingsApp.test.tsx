@@ -418,11 +418,17 @@ describe("설정 창", () => {
 
   it("최근 이력 삭제는 즉시 실행하고 설정을 dirty로 만들지 않는다", async () => {
     await renderLoadedSettings();
+    expect(
+      screen.getByText(/최근 사용률 이력과 알림 중복 방지 상태를 최대 25시간/),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "이력 삭제" }));
 
     await waitFor(() =>
       expect(mocks.invoke).toHaveBeenCalledWith("clear_pace_history"),
     );
+    expect(
+      await screen.findByText("최근 페이스 이력과 알림 상태를 삭제했습니다."),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "설정 닫기" }));
     await waitFor(() => expect(mocks.hide).toHaveBeenCalled());

@@ -326,13 +326,18 @@ fn save_editable_settings(
     if !preview.is_active(session_id) {
         return Err("설정 세션이 만료되었습니다. 설정 창을 다시 열어주세요.".to_string());
     }
+    let previous_pace_settings = state.settings.pace_settings();
     let saved = state.settings.set_editable_settings(settings)?;
     let saved_appearance = OverlayAppearance::from(&saved);
     let (next_session_id, update) = preview
         .commit_and_restart(session_id, saved_appearance)
         .ok_or_else(|| "설정 세션이 만료되었습니다. 설정 창을 다시 열어주세요.".to_string())?;
     drop(preview);
-    state.pace.recompute(&state.usage.state());
+    state.pace.settings_changed(
+        &previous_pace_settings,
+        &saved.pace_settings,
+        &state.usage.state(),
+    );
     emit_appearance_update(&app, update);
     Ok(SettingsSession {
         session_id: next_session_id,
