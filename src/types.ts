@@ -82,7 +82,6 @@ export interface PaceSettings {
 export interface EditableSettings {
   paceSettings: PaceSettings;
   overlayOpacity: number;
-  largePlanVisualization: LargePlanVisualization;
 }
 
 export interface SettingsSession {

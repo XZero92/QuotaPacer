@@ -15,8 +15,6 @@ import {
 } from "@tauri-apps/plugin-notification";
 import type {
   EditableSettings,
-  LargePlanVisualization,
-  OverlayAppearance,
   PacePlanMode,
   PaceSettings,
   SettingsSession,
@@ -33,24 +31,13 @@ const DEFAULT_PACE_SETTINGS: PaceSettings = {
 const DEFAULT_EDITABLE_SETTINGS: EditableSettings = {
   paceSettings: DEFAULT_PACE_SETTINGS,
   overlayOpacity: DEFAULT_OVERLAY_OPACITY,
-  largePlanVisualization: "deviation",
 };
-
-function overlayAppearanceFromSettings(
-  settings: EditableSettings,
-): OverlayAppearance {
-  return {
-    overlayOpacity: settings.overlayOpacity,
-    largePlanVisualization: settings.largePlanVisualization,
-  };
-}
 
 type PermissionStatus = "checking" | "granted" | "denied";
 
 function settingsEqual(left: EditableSettings, right: EditableSettings) {
   return (
     left.overlayOpacity === right.overlayOpacity &&
-    left.largePlanVisualization === right.largePlanVisualization &&
     left.paceSettings.planMode === right.paceSettings.planMode &&
     left.paceSettings.osNotificationsEnabled ===
       right.paceSettings.osNotificationsEnabled &&
@@ -91,9 +78,7 @@ function SettingsApp() {
   const sessionReloadRequestedRef = useRef(false);
   const previewRevisionRef = useRef(0);
   const previewFrameRef = useRef<number | null>(null);
-  const pendingAppearanceRef = useRef<OverlayAppearance>(
-    overlayAppearanceFromSettings(DEFAULT_EDITABLE_SETTINGS),
-  );
+  const pendingOpacityRef = useRef(DEFAULT_OVERLAY_OPACITY);
   const requestCloseRef = useRef<() => void>(() => undefined);
   const opacityTooltipTimerRef = useRef<number | null>(null);
   const opacityPointerActiveRef = useRef(false);
@@ -154,9 +139,7 @@ function SettingsApp() {
       hideOpacityTooltip();
       sessionIdRef.current = session.sessionId;
       previewRevisionRef.current = 0;
-      pendingAppearanceRef.current = overlayAppearanceFromSettings(
-        session.settings,
-      );
+      pendingOpacityRef.current = session.settings.overlayOpacity;
       setSessionId(session.sessionId);
       setPersistedSettings(session.settings);
       setDraftSettings(session.settings);
@@ -192,19 +175,19 @@ function SettingsApp() {
       .catch(() => setPermission("denied"));
   }, []);
 
-  const scheduleAppearancePreview = useCallback(
-    (appearance: OverlayAppearance) => {
-      pendingAppearanceRef.current = appearance;
+  const scheduleOpacityPreview = useCallback(
+    (overlayOpacity: number) => {
+      pendingOpacityRef.current = overlayOpacity;
       if (previewFrameRef.current !== null) return;
       previewFrameRef.current = window.requestAnimationFrame(() => {
         previewFrameRef.current = null;
         const activeSessionId = sessionIdRef.current;
         if (activeSessionId === null) return;
         const revision = ++previewRevisionRef.current;
-        void invoke("preview_overlay_appearance", {
+        void invoke("preview_overlay_opacity", {
           sessionId: activeSessionId,
           revision,
-          appearance: pendingAppearanceRef.current,
+          overlayOpacity: pendingOpacityRef.current,
         }).catch((error) => {
           if (sessionIdRef.current === activeSessionId) {
             setMessage(String(error));
@@ -350,24 +333,7 @@ function SettingsApp() {
       ...current,
       overlayOpacity: opacityPercent,
     }));
-    scheduleAppearancePreview({
-      ...pendingAppearanceRef.current,
-      overlayOpacity: opacityPercent,
-    });
-    setMessage("");
-  };
-
-  const setLargePlanVisualization = (
-    largePlanVisualization: LargePlanVisualization,
-  ) => {
-    setDraftSettings((current) => ({
-      ...current,
-      largePlanVisualization,
-    }));
-    scheduleAppearancePreview({
-      ...pendingAppearanceRef.current,
-      largePlanVisualization,
-    });
+    scheduleOpacityPreview(opacityPercent);
     setMessage("");
   };
 
@@ -539,70 +505,6 @@ function SettingsApp() {
               </p>
             </>
           )}
-          <div className="plan-visualization-setting">
-            <h3>Large 모드 · 7일 계획 표시</h3>
-            <p className="section-help">
-              정확히 7일인 제한 창에 적용되며, 현재 오버레이가 Large이면 선택
-              즉시 미리보기됩니다. 다른 길이의 제한 창은 항상 페이스 편차로
-              표시합니다.
-            </p>
-            <div
-              className="visualization-options"
-              role="radiogroup"
-              aria-label="Large 모드 7일 계획 표시"
-            >
-              <button
-                type="button"
-                role="radio"
-                aria-checked={
-                  draftSettings.largePlanVisualization === "deviation"
-                }
-                className={
-                  draftSettings.largePlanVisualization === "deviation"
-                    ? "selected"
-                    : ""
-                }
-                disabled={formBusy}
-                onClick={() => setLargePlanVisualization("deviation")}
-              >
-                <span
-                  className="visualization-preview preview-deviation"
-                  aria-hidden="true"
-                >
-                  <i />
-                  <b />
-                </span>
-                <strong>페이스 편차</strong>
-                <small>계획선보다 앞서거나 뒤처진 정도</small>
-              </button>
-              <button
-                type="button"
-                role="radio"
-                aria-checked={
-                  draftSettings.largePlanVisualization === "weeklyAllocation"
-                }
-                className={
-                  draftSettings.largePlanVisualization === "weeklyAllocation"
-                    ? "selected"
-                    : ""
-                }
-                disabled={formBusy}
-                onClick={() => setLargePlanVisualization("weeklyAllocation")}
-              >
-                <span
-                  className="visualization-preview preview-allocation"
-                  aria-hidden="true"
-                >
-                  {DAY_LABELS.map((label) => (
-                    <i key={label} />
-                  ))}
-                  <b />
-                </span>
-                <strong>주간 배분</strong>
-                <small>요일별 계획과 누적 사용량</small>
-              </button>
-            </div>
-          </div>
         </section>
 
         <section>

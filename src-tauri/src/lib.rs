@@ -7,8 +7,8 @@ use codex::{inspect_cli, CliInfo, UsageService};
 use pace::{PaceService, PaceViewState};
 use serde::{Deserialize, Serialize};
 use settings::{
-    validate_overlay_opacity, EditableSettings, LargePlanVisualization, OverlaySize, SettingsStore,
-    StoredPosition,
+    validate_overlay_opacity, EditableSettings, LargePlanVisualization, OverlayAppearanceSettings,
+    OverlaySize, SettingsStore, StoredPosition,
 };
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -47,8 +47,8 @@ struct OverlayAppearance {
     large_plan_visualization: LargePlanVisualization,
 }
 
-impl From<&EditableSettings> for OverlayAppearance {
-    fn from(settings: &EditableSettings) -> Self {
+impl From<OverlayAppearanceSettings> for OverlayAppearance {
+    fn from(settings: OverlayAppearanceSettings) -> Self {
         Self {
             overlay_opacity: settings.overlay_opacity,
             large_plan_visualization: settings.large_plan_visualization,
@@ -112,17 +112,38 @@ impl OverlayAppearancePreviewController {
         &mut self,
         session_id: u64,
         revision: u64,
-        appearance: OverlayAppearance,
+        overlay_opacity: u8,
     ) -> Option<OverlayAppearanceUpdate> {
-        let accepted = self
-            .active
-            .as_mut()
-            .filter(|active| active.session_id == session_id && revision > active.latest_revision);
-        let active = accepted?;
-        active.latest_revision = revision;
-        active.appearance = appearance;
-        active.has_preview = true;
+        let appearance = {
+            let accepted = self.active.as_mut().filter(|active| {
+                active.session_id == session_id && revision > active.latest_revision
+            });
+            let active = accepted?;
+            active.latest_revision = revision;
+            active.appearance.overlay_opacity = overlay_opacity;
+            active.has_preview = true;
+            active.appearance
+        };
         Some(self.next_update(appearance, OverlayAppearancePhase::Preview))
+    }
+
+    fn commit_visualization(
+        &mut self,
+        persisted_appearance: OverlayAppearance,
+    ) -> OverlayAppearanceUpdate {
+        let (appearance, phase) = if let Some(active) = self.active.as_mut() {
+            active.appearance.large_plan_visualization =
+                persisted_appearance.large_plan_visualization;
+            if active.has_preview {
+                (active.appearance, OverlayAppearancePhase::Preview)
+            } else {
+                active.appearance = persisted_appearance;
+                (persisted_appearance, OverlayAppearancePhase::Committed)
+            }
+        } else {
+            (persisted_appearance, OverlayAppearancePhase::Committed)
+        };
+        self.next_update(appearance, phase)
     }
 
     fn cancel(
@@ -289,7 +310,7 @@ fn begin_settings_session(
     state: State<'_, AppState>,
 ) -> Result<SettingsSession, String> {
     let settings = state.settings.editable_settings();
-    let persisted_appearance = OverlayAppearance::from(&settings);
+    let persisted_appearance = OverlayAppearance::from(state.settings.overlay_appearance());
     let (session_id, reverted) = state
         .appearance_preview
         .lock()
@@ -305,22 +326,43 @@ fn begin_settings_session(
 }
 
 #[tauri::command]
-fn preview_overlay_appearance(
+fn preview_overlay_opacity(
     session_id: u64,
     revision: u64,
-    appearance: OverlayAppearance,
+    overlay_opacity: u8,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Option<OverlayAppearanceUpdate>, String> {
-    validate_overlay_opacity(appearance.overlay_opacity)?;
+    validate_overlay_opacity(overlay_opacity)?;
     let update = state
         .appearance_preview
         .lock()
         .map_err(|_| "오버레이 미리보기 상태를 잠글 수 없습니다.".to_string())?
-        .preview(session_id, revision, appearance);
+        .preview(session_id, revision, overlay_opacity);
     if let Some(update) = update {
         emit_appearance_update(&app, update);
     }
+    Ok(update)
+}
+
+#[tauri::command]
+fn set_large_plan_visualization(
+    large_plan_visualization: LargePlanVisualization,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<OverlayAppearanceUpdate, String> {
+    let mut preview = state
+        .appearance_preview
+        .lock()
+        .map_err(|_| "오버레이 미리보기 상태를 잠글 수 없습니다.".to_string())?;
+    let persisted_appearance = OverlayAppearance::from(
+        state
+            .settings
+            .set_large_plan_visualization(large_plan_visualization)?,
+    );
+    let update = preview.commit_visualization(persisted_appearance);
+    drop(preview);
+    emit_appearance_update(&app, update);
     Ok(update)
 }
 
@@ -340,7 +382,7 @@ fn save_editable_settings(
     }
     let previous_pace_settings = state.settings.pace_settings();
     let saved = state.settings.set_editable_settings(settings)?;
-    let saved_appearance = OverlayAppearance::from(&saved);
+    let saved_appearance = OverlayAppearance::from(state.settings.overlay_appearance());
     let (next_session_id, update) = preview
         .commit_and_restart(session_id, saved_appearance)
         .ok_or_else(|| "설정 세션이 만료되었습니다. 설정 창을 다시 열어주세요.".to_string())?;
@@ -363,8 +405,7 @@ fn cancel_settings_session(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let persisted_settings = state.settings.editable_settings();
-    let persisted_appearance = OverlayAppearance::from(&persisted_settings);
+    let persisted_appearance = OverlayAppearance::from(state.settings.overlay_appearance());
     let update = state
         .appearance_preview
         .lock()
@@ -380,8 +421,7 @@ fn cancel_settings_session(
 fn get_effective_overlay_appearance(
     state: State<'_, AppState>,
 ) -> Result<OverlayAppearanceUpdate, String> {
-    let persisted_settings = state.settings.editable_settings();
-    let persisted_appearance = OverlayAppearance::from(&persisted_settings);
+    let persisted_appearance = OverlayAppearance::from(state.settings.overlay_appearance());
     let preview = state
         .appearance_preview
         .lock()
@@ -468,7 +508,8 @@ pub fn run() {
             clear_codex_executable,
             get_overlay_size,
             begin_settings_session,
-            preview_overlay_appearance,
+            preview_overlay_opacity,
+            set_large_plan_visualization,
             save_editable_settings,
             cancel_settings_session,
             get_effective_overlay_appearance,
@@ -870,38 +911,22 @@ mod tests {
     #[test]
     fn appearance_preview_rejects_stale_sessions_and_revisions() {
         let persisted = appearance(100, LargePlanVisualization::Deviation);
-        let first_preview = appearance(70, LargePlanVisualization::WeeklyAllocation);
         let mut controller = OverlayAppearancePreviewController::default();
         let (first_session, _) = controller.begin(persisted);
-        let first = controller.preview(first_session, 1, first_preview).unwrap();
+        let first = controller.preview(first_session, 1, 70).unwrap();
         assert_eq!(first.phase, OverlayAppearancePhase::Preview);
-        assert_eq!(first.appearance, first_preview);
-        assert!(controller
-            .preview(
-                first_session,
-                1,
-                appearance(60, LargePlanVisualization::Deviation)
-            )
-            .is_none());
+        assert_eq!(
+            first.appearance,
+            appearance(70, LargePlanVisualization::Deviation)
+        );
+        assert!(controller.preview(first_session, 1, 60).is_none());
 
         let (second_session, reverted) = controller.begin(persisted);
         let reverted = reverted.unwrap();
         assert_eq!(reverted.phase, OverlayAppearancePhase::Reverted);
         assert_eq!(reverted.appearance, persisted);
-        assert!(controller
-            .preview(
-                first_session,
-                2,
-                appearance(50, LargePlanVisualization::Deviation)
-            )
-            .is_none());
-        assert!(controller
-            .preview(
-                second_session,
-                1,
-                appearance(65, LargePlanVisualization::WeeklyAllocation)
-            )
-            .is_some());
+        assert!(controller.preview(first_session, 2, 50).is_none());
+        assert!(controller.preview(second_session, 1, 65).is_some());
     }
 
     #[test]
@@ -910,7 +935,7 @@ mod tests {
         let saved = appearance(65, LargePlanVisualization::WeeklyAllocation);
         let mut controller = OverlayAppearancePreviewController::default();
         let (session, _) = controller.begin(persisted);
-        let preview = controller.preview(session, 1, saved).unwrap();
+        let preview = controller.preview(session, 1, 65).unwrap();
         let (next_session, committed) = controller.commit_and_restart(session, saved).unwrap();
 
         assert!(next_session > session);
@@ -918,22 +943,16 @@ mod tests {
         assert_eq!(committed.phase, OverlayAppearancePhase::Committed);
         assert_eq!(committed.appearance, saved);
         assert_eq!(controller.effective(saved).appearance, saved);
-        assert!(controller
-            .preview(
-                session,
-                2,
-                appearance(50, LargePlanVisualization::Deviation)
-            )
-            .is_none());
+        assert!(controller.preview(session, 2, 50).is_none());
     }
 
     #[test]
     fn appearance_preview_cancel_restores_the_persisted_value() {
         let persisted = appearance(100, LargePlanVisualization::Deviation);
-        let preview = appearance(40, LargePlanVisualization::WeeklyAllocation);
+        let preview = appearance(40, LargePlanVisualization::Deviation);
         let mut controller = OverlayAppearancePreviewController::default();
         let (session, _) = controller.begin(persisted);
-        controller.preview(session, 1, preview).unwrap();
+        controller.preview(session, 1, 40).unwrap();
         assert_eq!(
             controller.effective(persisted),
             super::OverlayAppearanceUpdate {
@@ -947,6 +966,26 @@ mod tests {
         assert_eq!(reverted.appearance, persisted);
         assert_eq!(reverted.phase, OverlayAppearancePhase::Reverted);
         assert_eq!(controller.effective(persisted).appearance, persisted);
+    }
+
+    #[test]
+    fn visualization_commit_merges_with_an_active_opacity_preview() {
+        let persisted = appearance(100, LargePlanVisualization::Deviation);
+        let selected = appearance(100, LargePlanVisualization::WeeklyAllocation);
+        let mut controller = OverlayAppearancePreviewController::default();
+        let (session, _) = controller.begin(persisted);
+        controller.preview(session, 1, 65).unwrap();
+
+        let update = controller.commit_visualization(selected);
+
+        assert_eq!(update.phase, OverlayAppearancePhase::Preview);
+        assert_eq!(
+            update.appearance,
+            appearance(65, LargePlanVisualization::WeeklyAllocation)
+        );
+        let reverted = controller.cancel(session, selected).unwrap();
+        assert_eq!(reverted.phase, OverlayAppearancePhase::Reverted);
+        assert_eq!(reverted.appearance, selected);
     }
 
     #[test]

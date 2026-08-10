@@ -794,6 +794,22 @@ function WeeklyAllocationGauge({
   );
 }
 
+type WeeklyAllocationPace = PaceWindowView & {
+  plannedUsedPercent: number;
+  planDeltaPercentPoints: number;
+  planBreakdown: PacePlanBreakdownView;
+};
+
+function canUseWeeklyAllocation(
+  pace: PaceWindowView | undefined,
+): pace is WeeklyAllocationPace {
+  return (
+    pace?.planBreakdown?.kind === "weekly" &&
+    pace.plannedUsedPercent !== null &&
+    pace.planDeltaPercentPoints !== null
+  );
+}
+
 function PlanVisualization({
   usedPercent,
   pace,
@@ -803,14 +819,8 @@ function PlanVisualization({
   pace: PaceWindowView | undefined;
   visualization: LargePlanVisualization;
 }) {
-  const breakdown = pace?.planBreakdown;
   const usesWeeklyAllocation =
-    visualization === "weeklyAllocation" &&
-    breakdown?.kind === "weekly" &&
-    pace?.plannedUsedPercent !== null &&
-    pace?.plannedUsedPercent !== undefined &&
-    pace.planDeltaPercentPoints !== null &&
-    pace.planDeltaPercentPoints !== undefined;
+    visualization === "weeklyAllocation" && canUseWeeklyAllocation(pace);
   const effectiveVisualization: LargePlanVisualization = usesWeeklyAllocation
     ? "weeklyAllocation"
     : "deviation";
@@ -829,7 +839,7 @@ function PlanVisualization({
       <WeeklyAllocationGauge
         usedPercent={usedPercent}
         pace={pace}
-        breakdown={breakdown}
+        breakdown={pace.planBreakdown}
         animateTransition={animateTransitions}
       />
     );
@@ -969,11 +979,19 @@ function LargeOverlay({
   usage,
   pace,
   planVisualization,
+  planVisualizationPending,
+  planVisualizationError,
+  onPlanVisualizationChange,
   recovery,
 }: {
   usage: UsageViewState;
   pace: PaceViewState;
   planVisualization: LargePlanVisualization;
+  planVisualizationPending: boolean;
+  planVisualizationError: string | null;
+  onPlanVisualizationChange: (
+    visualization: LargePlanVisualization,
+  ) => void;
   recovery?: CliRecoveryActions;
 }) {
   const windows = useMemo(() => sortedWindows(usage.windows), [usage.windows]);
@@ -981,6 +999,18 @@ function LargeOverlay({
     () => new Map(pace.windows.map((window) => [window.windowId, window])),
     [pace.windows],
   );
+  const canTogglePlanVisualization = windows.some((window) =>
+    canUseWeeklyAllocation(paceByWindow.get(window.id)),
+  );
+  const currentVisualizationLabel =
+    planVisualization === "deviation" ? "계획 대비" : "주간 배분";
+  const nextVisualization: LargePlanVisualization =
+    planVisualization === "deviation" ? "weeklyAllocation" : "deviation";
+  const nextVisualizationAction =
+    nextVisualization === "deviation" ? "계획 대비로" : "주간 배분으로";
+  const toggleDescription = planVisualizationError
+    ? `표시 방식 저장 실패: ${planVisualizationError}`
+    : `현재 7일 계획 표시: ${currentVisualizationLabel}. 클릭하면 ${nextVisualizationAction} 전환합니다.`;
   if (windows.length === 0) {
     return <EmptySurface usage={usage} recovery={recovery} />;
   }
@@ -993,11 +1023,49 @@ function LargeOverlay({
     >
       <header className="pace-list-header">
         <strong>Codex Pace</strong>
-        {usage.connection === "stale" ? (
-          <small>{staleLabel(usage.lastSuccessfulAt)}</small>
-        ) : (
-          <span className="pace-freshness" aria-label="최신 사용량" />
-        )}
+        <div className="pace-list-header-actions">
+          {canTogglePlanVisualization && (
+            <button
+              type="button"
+              className={`large-plan-toggle ${
+                planVisualizationError ? "is-error" : ""
+              }`}
+              aria-busy={planVisualizationPending}
+              aria-describedby={
+                planVisualizationError ? "large-plan-toggle-error" : undefined
+              }
+              aria-label={toggleDescription}
+              title={toggleDescription}
+              disabled={planVisualizationPending}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => onPlanVisualizationChange(nextVisualization)}
+            >
+              {currentVisualizationLabel}
+              <span className="large-plan-toggle-switch" aria-hidden="true">
+                ⇄
+              </span>
+              {planVisualizationError && (
+                <span className="large-plan-toggle-warning" aria-hidden="true">
+                  !
+                </span>
+              )}
+            </button>
+          )}
+          {usage.connection === "stale" ? (
+            <small>{staleLabel(usage.lastSuccessfulAt)}</small>
+          ) : (
+            <span className="pace-freshness" aria-label="최신 사용량" />
+          )}
+          {planVisualizationError && (
+            <span
+              id="large-plan-toggle-error"
+              className="visually-hidden"
+              role="status"
+            >
+              표시 방식 저장 실패: {planVisualizationError}
+            </span>
+          )}
+        </div>
       </header>
       <div className="pace-rows">
         {windows.map((window) => (
@@ -1028,8 +1096,14 @@ function App() {
   );
   const [cliActionError, setCliActionError] = useState<string | null>(null);
   const [cliActionPending, setCliActionPending] = useState(false);
+  const [planVisualizationError, setPlanVisualizationError] = useState<
+    string | null
+  >(null);
+  const [planVisualizationPending, setPlanVisualizationPending] =
+    useState(false);
   const [sizeReady, setSizeReady] = useState(false);
   const draggingRef = useRef(false);
+  const planVisualizationPendingRef = useRef(false);
   const lastAppearanceUpdateIdRef = useRef(-1);
 
   const applyAppearanceUpdate = useCallback(
@@ -1101,6 +1175,27 @@ function App() {
       setCliActionPending(false);
     }
   }, []);
+  const changePlanVisualization = useCallback(
+    async (visualization: LargePlanVisualization) => {
+      if (planVisualizationPendingRef.current) return;
+      planVisualizationPendingRef.current = true;
+      setPlanVisualizationPending(true);
+      setPlanVisualizationError(null);
+      try {
+        const update = await invoke<OverlayAppearanceUpdate>(
+          "set_large_plan_visualization",
+          { largePlanVisualization: visualization },
+        );
+        applyAppearanceUpdate(update);
+      } catch (error) {
+        setPlanVisualizationError(String(error));
+      } finally {
+        planVisualizationPendingRef.current = false;
+        setPlanVisualizationPending(false);
+      }
+    },
+    [applyAppearanceUpdate],
+  );
   const showContextMenu = useCallback(
     (event: React.MouseEvent<HTMLElement>) => {
       event.preventDefault();
@@ -1206,6 +1301,11 @@ function App() {
           usage={usage}
           pace={pace}
           planVisualization={largePlanVisualization}
+          planVisualizationPending={planVisualizationPending}
+          planVisualizationError={planVisualizationError}
+          onPlanVisualizationChange={(visualization) =>
+            void changePlanVisualization(visualization)
+          }
           recovery={cliRecovery}
         />
       )}

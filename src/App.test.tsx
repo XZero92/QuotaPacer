@@ -8,6 +8,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   LargePlanVisualization,
+  OverlayAppearanceUpdate,
   PaceViewState,
   UsageViewState,
 } from "./types";
@@ -97,8 +98,10 @@ function mockStartup(
   largePlanVisualization: LargePlanVisualization = "deviation",
   configuredCliPath: string | null = null,
   setCodexError: string | null = null,
+  setVisualizationResult: Promise<OverlayAppearanceUpdate> | null = null,
 ) {
-  mocks.invoke.mockImplementation((command: string) => {
+  mocks.invoke.mockImplementation(
+    (command: string, args?: { largePlanVisualization?: string }) => {
     if (command === "get_usage_state") return Promise.resolve(usage);
     if (command === "get_pace_state") return Promise.resolve(pace);
     if (command === "get_overlay_size") return Promise.resolve(size);
@@ -115,8 +118,20 @@ function mockStartup(
       return Promise.resolve(configuredCliPath);
     if (command === "set_codex_executable" && setCodexError)
       return Promise.reject(setCodexError);
+    if (command === "set_large_plan_visualization") {
+      if (setVisualizationResult) return setVisualizationResult;
+      return Promise.resolve({
+        appearance: {
+          overlayOpacity: 100,
+          largePlanVisualization: args?.largePlanVisualization,
+        },
+        phase: "committed",
+        updateId: 1,
+      });
+    }
     return Promise.resolve();
-  });
+    },
+  );
 }
 
 describe("Codex 사용량 오버레이", () => {
@@ -469,6 +484,9 @@ describe("Codex 사용량 오버레이", () => {
     expect(container.querySelectorAll(".allocation-track")).toHaveLength(1);
     expect(container.querySelectorAll(".deviation-track")).toHaveLength(1);
     expect(
+      screen.getAllByRole("button", { name: /현재 7일 계획 표시/ }),
+    ).toHaveLength(1);
+    expect(
       container.querySelector(".plan-visual.with-transition"),
     ).not.toBeInTheDocument();
 
@@ -493,6 +511,120 @@ describe("Codex 사용량 오버레이", () => {
     expect(
       container.querySelector(".allocation-track"),
     ).not.toBeInTheDocument();
+  });
+
+  it("Large 헤더 토글은 저장 성공 후 모든 주간 시각화를 전환하고 드래그를 시작하지 않는다", async () => {
+    const secondWeeklyWindow = {
+      ...weeklyOnly.windows[0],
+      id: "codex:another-weekly",
+    };
+    mockStartup(
+      "large",
+      {
+        ...weeklyOnly,
+        windows: [weeklyOnly.windows[0], secondWeeklyWindow],
+      },
+      {
+        ...weeklyPace,
+        windows: [
+          weeklyPace.windows[0],
+          { ...weeklyPace.windows[0], windowId: secondWeeklyWindow.id },
+        ],
+      },
+    );
+    const { container } = render(<App />);
+    const toggle = await screen.findByRole("button", {
+      name: /현재 7일 계획 표시: 계획 대비.*주간 배분.*전환/,
+    });
+    expect(toggle.querySelector(".large-plan-toggle-switch")).toHaveTextContent(
+      "⇄",
+    );
+
+    fireEvent.pointerDown(toggle);
+    fireEvent.click(toggle);
+
+    expect(mocks.startDragging).not.toHaveBeenCalled();
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      "set_large_plan_visualization",
+      { largePlanVisualization: "weeklyAllocation" },
+    );
+    await waitFor(() =>
+      expect(container.querySelectorAll(".allocation-track")).toHaveLength(2),
+    );
+    expect(
+      screen.getByRole("button", {
+        name: /현재 7일 계획 표시: 주간 배분.*계획 대비.*전환/,
+      }),
+    ).toHaveTextContent("주간 배분");
+  });
+
+  it("주간 시각화를 만들 수 없으면 Large 헤더 토글을 숨긴다", async () => {
+    mockStartup("large", weeklyOnly, {
+      ...weeklyPace,
+      windows: [
+        {
+          ...weeklyPace.windows[0],
+          planBreakdown: null,
+        },
+      ],
+    });
+    render(<App />);
+
+    expect(await screen.findByText("Codex Pace")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /현재 7일 계획 표시/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("Large 표시 저장 중 중복 클릭을 막고 실패 상태에서 재시도한다", async () => {
+    let rejectSave: ((reason?: unknown) => void) | undefined;
+    const pendingSave = new Promise<OverlayAppearanceUpdate>((_, reject) => {
+      rejectSave = reject;
+    });
+    mockStartup(
+      "large",
+      weeklyOnly,
+      weeklyPace,
+      "deviation",
+      null,
+      null,
+      pendingSave,
+    );
+    render(<App />);
+    const toggle = await screen.findByRole("button", {
+      name: /현재 7일 계획 표시: 계획 대비/,
+    });
+
+    fireEvent.click(toggle);
+    fireEvent.click(toggle);
+    expect(
+      mocks.invoke.mock.calls.filter(
+        ([command]) => command === "set_large_plan_visualization",
+      ),
+    ).toHaveLength(1);
+    expect(toggle).toBeDisabled();
+
+    rejectSave?.("설정 파일을 저장할 수 없습니다.");
+    const failedToggle = await screen.findByRole("button", {
+      name: /표시 방식 저장 실패: 설정 파일을 저장할 수 없습니다/,
+    });
+    expect(failedToggle).toHaveTextContent("계획 대비");
+    expect(failedToggle).toHaveClass("is-error");
+
+    mocks.invoke.mockResolvedValue({
+      appearance: {
+        overlayOpacity: 100,
+        largePlanVisualization: "weeklyAllocation",
+      },
+      phase: "committed",
+      updateId: 1,
+    });
+    fireEvent.click(failedToggle);
+    expect(
+      await screen.findByRole("button", {
+        name: /현재 7일 계획 표시: 주간 배분/,
+      }),
+    ).not.toHaveClass("is-error");
   });
 
   it("large는 페이스 갱신 이벤트의 계획 초과 상태를 반영한다", async () => {
@@ -775,7 +907,7 @@ describe("Codex 사용량 오버레이", () => {
     );
 
     expect(overlay).toHaveStyle({ "--overlay-opacity": "0.65" });
-    expect(screen.getByText("계획 대비")).toBeInTheDocument();
+    expect(screen.getAllByText("계획 대비")).toHaveLength(2);
     mocks.listeners.get("ui://overlay-appearance-updated")?.({
       payload: {
         appearance: {
@@ -832,7 +964,7 @@ describe("Codex 사용량 오버레이", () => {
     await waitFor(() =>
       expect(overlay).not.toHaveClass("is-appearance-previewing"),
     );
-    expect(screen.getByText("계획 대비")).toBeInTheDocument();
+    expect(screen.getAllByText("계획 대비")).toHaveLength(2);
   });
 
   it("Large 표시 미리보기는 middle 오버레이의 크기를 바꾸지 않는다", async () => {
@@ -853,6 +985,9 @@ describe("Codex 사용량 오버레이", () => {
     expect(screen.getByText("74% 남음")).toBeInTheDocument();
     expect(
       screen.queryByRole("region", { name: "Codex 페이스 예측" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /현재 7일 계획 표시/ }),
     ).not.toBeInTheDocument();
   });
 

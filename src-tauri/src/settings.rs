@@ -47,6 +47,11 @@ pub struct PaceSettings {
 pub struct EditableSettings {
     pub pace_settings: PaceSettings,
     pub overlay_opacity: u8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OverlayAppearanceSettings {
+    pub overlay_opacity: u8,
     pub large_plan_visualization: LargePlanVisualization,
 }
 
@@ -207,13 +212,42 @@ impl SettingsStore {
             .map(|value| EditableSettings {
                 pace_settings: value.pace.clone(),
                 overlay_opacity: value.overlay_opacity,
-                large_plan_visualization: value.large_plan_visualization,
             })
             .unwrap_or_else(|_| EditableSettings {
                 pace_settings: PaceSettings::default(),
                 overlay_opacity: DEFAULT_OVERLAY_OPACITY,
+            })
+    }
+
+    pub fn overlay_appearance(&self) -> OverlayAppearanceSettings {
+        self.value
+            .lock()
+            .map(|value| OverlayAppearanceSettings {
+                overlay_opacity: value.overlay_opacity,
+                large_plan_visualization: value.large_plan_visualization,
+            })
+            .unwrap_or(OverlayAppearanceSettings {
+                overlay_opacity: DEFAULT_OVERLAY_OPACITY,
                 large_plan_visualization: LargePlanVisualization::default(),
             })
+    }
+
+    pub fn set_large_plan_visualization(
+        &self,
+        large_plan_visualization: LargePlanVisualization,
+    ) -> Result<OverlayAppearanceSettings, String> {
+        let mut value = self
+            .value
+            .lock()
+            .map_err(|_| "설정을 잠글 수 없습니다.".to_string())?;
+        let mut next = value.clone();
+        next.large_plan_visualization = large_plan_visualization;
+        self.save_locked(&next)?;
+        *value = next;
+        Ok(OverlayAppearanceSettings {
+            overlay_opacity: value.overlay_opacity,
+            large_plan_visualization: value.large_plan_visualization,
+        })
     }
 
     pub fn set_editable_settings(
@@ -228,7 +262,6 @@ impl SettingsStore {
         let mut next = value.clone();
         next.pace = settings.pace_settings.clone();
         next.overlay_opacity = settings.overlay_opacity;
-        next.large_plan_visualization = settings.large_plan_visualization;
         self.save_locked(&next)?;
         *value = next;
         Ok(settings)
@@ -385,6 +418,7 @@ mod tests {
             codex_executable: Some("custom-codex".to_string()),
             window_position: Some(super::StoredPosition { x: 42, y: 84 }),
             overlay_size: OverlaySize::Large,
+            large_plan_visualization: LargePlanVisualization::WeeklyAllocation,
             ..AppSettings::default()
         };
         let store = SettingsStore {
@@ -397,7 +431,6 @@ mod tests {
                 ..PaceSettings::default()
             },
             overlay_opacity: 65,
-            large_plan_visualization: LargePlanVisualization::WeeklyAllocation,
         };
 
         store.set_editable_settings(editable.clone()).unwrap();
@@ -408,6 +441,10 @@ mod tests {
         assert_eq!(saved.codex_executable.as_deref(), Some("custom-codex"));
         assert_eq!(saved.window_position.unwrap().x, 42);
         assert_eq!(saved.overlay_size, OverlaySize::Large);
+        assert_eq!(
+            saved.large_plan_visualization,
+            LargePlanVisualization::WeeklyAllocation
+        );
         let _ = std::fs::remove_file(path);
     }
 
@@ -424,7 +461,6 @@ mod tests {
                 ..PaceSettings::default()
             },
             overlay_opacity: 65,
-            large_plan_visualization: LargePlanVisualization::WeeklyAllocation,
         };
 
         assert!(store.set_editable_settings(changed).is_err());
@@ -433,8 +469,47 @@ mod tests {
             EditableSettings {
                 pace_settings: PaceSettings::default(),
                 overlay_opacity: DEFAULT_OVERLAY_OPACITY,
-                large_plan_visualization: LargePlanVisualization::Deviation,
             }
+        );
+    }
+
+    #[test]
+    fn large_plan_visualization_saves_without_touching_other_settings() {
+        let path = unique_test_path("large-plan-visualization");
+        let store = SettingsStore::load(path.clone());
+
+        let appearance = store
+            .set_large_plan_visualization(LargePlanVisualization::WeeklyAllocation)
+            .unwrap();
+        let saved: AppSettings =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+
+        assert_eq!(appearance.overlay_opacity, DEFAULT_OVERLAY_OPACITY);
+        assert_eq!(
+            appearance.large_plan_visualization,
+            LargePlanVisualization::WeeklyAllocation
+        );
+        assert_eq!(
+            saved.large_plan_visualization,
+            LargePlanVisualization::WeeklyAllocation
+        );
+        assert_eq!(saved.overlay_opacity, DEFAULT_OVERLAY_OPACITY);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn failed_large_plan_visualization_save_keeps_the_in_memory_value() {
+        let store = SettingsStore {
+            path: std::env::temp_dir(),
+            value: Arc::new(Mutex::new(AppSettings::default())),
+        };
+
+        assert!(store
+            .set_large_plan_visualization(LargePlanVisualization::WeeklyAllocation)
+            .is_err());
+        assert_eq!(
+            store.overlay_appearance().large_plan_visualization,
+            LargePlanVisualization::Deviation
         );
     }
 
