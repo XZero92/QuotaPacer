@@ -255,15 +255,27 @@ fn refresh_usage(state: State<'_, AppState>) {
 }
 
 #[tauri::command]
-fn set_codex_executable(
-    path: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<CliInfo, String> {
-    let explicit_path = path.map(PathBuf::from);
-    let cli = inspect_cli(explicit_path.clone())?;
-    state.settings.set_codex_executable(explicit_path)?;
+fn set_codex_executable(path: String, state: State<'_, AppState>) -> Result<CliInfo, String> {
+    let explicit_path = PathBuf::from(path);
+    let cli = inspect_cli(Some(explicit_path.clone()))?;
+    state.settings.set_codex_executable(Some(explicit_path))?;
     state.usage.executable_changed();
     Ok(cli)
+}
+
+#[tauri::command]
+fn get_codex_executable_preference(state: State<'_, AppState>) -> Option<String> {
+    state
+        .settings
+        .codex_executable()
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn clear_codex_executable(state: State<'_, AppState>) -> Result<(), String> {
+    state.settings.set_codex_executable(None)?;
+    state.usage.executable_changed();
+    Ok(())
 }
 
 #[tauri::command]
@@ -452,6 +464,8 @@ pub fn run() {
             show_pace_settings,
             refresh_usage,
             set_codex_executable,
+            get_codex_executable_preference,
+            clear_codex_executable,
             get_overlay_size,
             begin_settings_session,
             preview_overlay_appearance,
@@ -497,8 +511,6 @@ fn setup_menus(app: &mut tauri::App, selected: OverlaySize) -> tauri::Result<Ove
     let (tray_size_menu, tray_sizes) = build_size_submenu(app, "tray", selected)?;
     let tray_toggle = MenuItemBuilder::with_id("tray-toggle", "표시/숨기기").build(app)?;
     let tray_refresh = MenuItemBuilder::with_id("tray-refresh", "새로고침").build(app)?;
-    let tray_choose_cli =
-        MenuItemBuilder::with_id("tray-choose-cli", "Codex CLI 경로 선택").build(app)?;
     let tray_pace_settings = MenuItemBuilder::with_id("tray-pace-settings", "설정").build(app)?;
     let tray_quit = MenuItemBuilder::with_id("tray-quit", "종료").build(app)?;
     let tray_menu = MenuBuilder::new(app)
@@ -507,15 +519,12 @@ fn setup_menus(app: &mut tauri::App, selected: OverlaySize) -> tauri::Result<Ove
             &tray_refresh,
             &tray_size_menu,
             &tray_pace_settings,
-            &tray_choose_cli,
             &tray_quit,
         ])
         .build()?;
 
     let (context_size_menu, context_sizes) = build_size_submenu(app, "context", selected)?;
     let context_refresh = MenuItemBuilder::with_id("context-refresh", "새로고침").build(app)?;
-    let context_choose_cli =
-        MenuItemBuilder::with_id("context-choose-cli", "Codex CLI 경로 선택").build(app)?;
     let context_pace_settings =
         MenuItemBuilder::with_id("context-pace-settings", "설정").build(app)?;
     let context_hide = MenuItemBuilder::with_id("context-hide", "숨기기").build(app)?;
@@ -526,7 +535,6 @@ fn setup_menus(app: &mut tauri::App, selected: OverlaySize) -> tauri::Result<Ove
         .items(&[
             &context_refresh,
             &context_pace_settings,
-            &context_choose_cli,
             &context_hide,
             &context_quit,
         ])
@@ -559,10 +567,6 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
             if let Some(state) = app.try_state::<AppState>() {
                 state.usage.refresh();
             }
-        }
-        "tray-choose-cli" | "context-choose-cli" => {
-            show_main_window(app);
-            let _ = app.emit("usage://pick-cli", ());
         }
         id if is_pace_settings_menu_id(id) => show_settings_window(app),
         "context-hide" => {

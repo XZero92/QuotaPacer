@@ -299,6 +299,28 @@ mod tests {
     }
 
     #[test]
+    fn custom_codex_executable_can_return_to_automatic_detection() {
+        let path = unique_test_path("codex-executable-clear");
+        let store = SettingsStore::load(path.clone());
+
+        store
+            .set_codex_executable(Some(PathBuf::from("custom-codex")))
+            .unwrap();
+        assert_eq!(
+            store.codex_executable(),
+            Some(PathBuf::from("custom-codex"))
+        );
+
+        store.set_codex_executable(None).unwrap();
+        let saved: AppSettings =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+
+        assert_eq!(store.codex_executable(), None);
+        assert_eq!(saved.codex_executable, None);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn overlay_opacity_uses_a_readable_percentage_range() {
         let settings: AppSettings = serde_json::from_str(r#"{"overlayOpacity":65}"#).unwrap();
 

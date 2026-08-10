@@ -80,11 +80,23 @@ const weeklyPace: PaceViewState = {
   updatedAt: 649_216,
 };
 
+const cliMissing: UsageViewState = {
+  connection: "cli_missing",
+  windows: [],
+  featuredWindowId: null,
+  fetchedAt: null,
+  lastSuccessfulAt: null,
+  errorMessage:
+    "Codex CLI를 찾을 수 없습니다. CLI를 설치하거나 실행 파일 경로를 선택해 주세요.",
+};
+
 function mockStartup(
   size: "small" | "middle" | "large" = "middle",
   usage = weeklyOnly,
   pace = weeklyPace,
   largePlanVisualization: LargePlanVisualization = "deviation",
+  configuredCliPath: string | null = null,
+  setCodexError: string | null = null,
 ) {
   mocks.invoke.mockImplementation((command: string) => {
     if (command === "get_usage_state") return Promise.resolve(usage);
@@ -99,6 +111,10 @@ function mockStartup(
         phase: "committed",
         updateId: 0,
       });
+    if (command === "get_codex_executable_preference")
+      return Promise.resolve(configuredCliPath);
+    if (command === "set_codex_executable" && setCodexError)
+      return Promise.reject(setCodexError);
     return Promise.resolve();
   });
 }
@@ -169,6 +185,118 @@ describe("Codex 사용량 오버레이", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("region", { name: "Codex 사용량 상세" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("CLI를 찾지 못하면 확장자 제한 없는 복구 선택을 제공한다", async () => {
+    mockStartup("middle", cliMissing);
+    mocks.open.mockResolvedValue("C:\\tools\\codex.cmd");
+    render(<App />);
+
+    const chooseButton = await screen.findByRole("button", {
+      name: "CLI 선택",
+    });
+    fireEvent.pointerDown(chooseButton, { button: 0 });
+    expect(mocks.startDragging).not.toHaveBeenCalled();
+
+    fireEvent.click(chooseButton);
+    await waitFor(() => {
+      expect(mocks.open).toHaveBeenCalledWith({
+        multiple: false,
+        directory: false,
+        title: "Codex CLI 실행 파일 선택",
+      });
+      expect(mocks.invoke).toHaveBeenCalledWith("set_codex_executable", {
+        path: "C:\\tools\\codex.cmd",
+      });
+    });
+  });
+
+  it("CLI 선택을 취소하면 저장 명령을 호출하지 않는다", async () => {
+    mockStartup("middle", cliMissing);
+    mocks.open.mockResolvedValue(null);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "CLI 선택" }));
+    await waitFor(() => expect(mocks.open).toHaveBeenCalled());
+    expect(mocks.invoke).not.toHaveBeenCalledWith(
+      "set_codex_executable",
+      expect.anything(),
+    );
+  });
+
+  it("잘못된 CLI를 선택하면 오류를 표시하고 다시 선택할 수 있다", async () => {
+    mockStartup(
+      "middle",
+      cliMissing,
+      weeklyPace,
+      "deviation",
+      null,
+      "설치된 Codex CLI가 app-server를 지원하지 않습니다.",
+    );
+    mocks.open.mockResolvedValue("C:\\tools\\old-codex.exe");
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "CLI 선택" }));
+
+    expect(
+      await screen.findByText(
+        "설치된 Codex CLI가 app-server를 지원하지 않습니다.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "CLI 선택" })).toBeEnabled();
+  });
+
+  it("저장된 경로가 실패하면 자동 탐지로 되돌릴 수 있다", async () => {
+    mockStartup(
+      "middle",
+      { ...cliMissing, connection: "cli_unsupported" },
+      weeklyPace,
+      "deviation",
+      "C:\\tools\\old-codex.exe",
+    );
+    render(<App />);
+
+    expect(
+      await screen.findByRole("button", { name: "다른 CLI 선택" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "자동 탐지" }));
+
+    await waitFor(() => {
+      expect(mocks.invoke).toHaveBeenCalledWith("clear_codex_executable");
+    });
+  });
+
+  it("small 오류 상태에서도 CLI 복구를 제공한다", async () => {
+    mockStartup("small", cliMissing);
+    render(<App />);
+
+    expect(
+      await screen.findByRole("button", { name: "CLI 선택" }),
+    ).toBeInTheDocument();
+  });
+
+  it("로그인 오류와 정상 상태에서는 CLI 복구를 노출하지 않는다", async () => {
+    mockStartup("middle", {
+      ...cliMissing,
+      connection: "login_required",
+      errorMessage: "ChatGPT 계정으로 로그인한 Codex CLI가 필요합니다.",
+    });
+    const { unmount } = render(<App />);
+
+    expect(
+      await screen.findByText("Codex 로그인이 필요합니다"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /CLI 선택/ }),
+    ).not.toBeInTheDocument();
+    unmount();
+
+    mockStartup();
+    render(<App />);
+    expect(await screen.findByText("74% 남음")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /CLI 선택/ }),
     ).not.toBeInTheDocument();
   });
 

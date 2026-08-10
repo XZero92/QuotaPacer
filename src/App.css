@@ -165,6 +165,25 @@ body,
   font-weight: 600;
 }
 
+.cli-recovery-compact {
+  width: fit-content;
+  margin: 1px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #8fbaff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.cli-recovery-compact:disabled {
+  color: #8d949e;
+  cursor: wait;
+}
+
 .small-card.is-empty {
   --tone: #59616c;
 }
@@ -828,6 +847,20 @@ body,
   border-radius: 16px;
 }
 
+.empty-surface.is-actionable {
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  flex-direction: row;
+}
+
+.empty-surface-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
 .empty-surface strong,
 .empty-surface small {
   max-width: 100%;
@@ -844,6 +877,38 @@ body,
   margin-top: 4px;
   color: #858d98;
   font-size: 12px;
+}
+
+.cli-recovery-actions {
+  display: flex;
+  flex: none;
+  gap: 5px;
+  align-items: center;
+}
+
+.cli-recovery-actions button {
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid rgb(117 167 255 / 45%);
+  border-radius: 8px;
+  background: rgb(75 126 216 / 22%);
+  color: #b9d1ff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.cli-recovery-actions button.is-secondary {
+  border-color: rgb(255 255 255 / 14%);
+  background: rgb(255 255 255 / 5%);
+  color: #a5adb8;
+}
+
+.cli-recovery-actions button:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .tone-normal {

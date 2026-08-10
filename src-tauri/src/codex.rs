@@ -91,7 +91,7 @@ impl UsageService {
 
 pub fn inspect_cli(path: Option<PathBuf>) -> Result<CliInfo, String> {
     let executable = resolve_codex_executable(path)?;
-    validate_cli(&executable)
+    validate_compatible_cli(&executable)
 }
 
 fn service_loop(
@@ -188,16 +188,10 @@ fn connect(explicit_path: Option<PathBuf>) -> Result<(RpcProcess, UsageViewState
         connection: ConnectionState::CliMissing,
         message,
     })?;
-    let cli = validate_cli(&executable).map_err(|message| ServiceFailure {
+    let cli = validate_compatible_cli(&executable).map_err(|message| ServiceFailure {
         connection: ConnectionState::CliUnsupported,
         message,
     })?;
-    if !cli.app_server_supported {
-        return Err(ServiceFailure {
-            connection: ConnectionState::CliUnsupported,
-            message: "설치된 Codex CLI가 app-server를 지원하지 않습니다.".to_string(),
-        });
-    }
 
     let mut rpc = RpcProcess::spawn(&executable).map_err(|message| ServiceFailure {
         connection: ConnectionState::Error,
@@ -448,6 +442,14 @@ fn validate_cli(executable: &Path) -> Result<CliInfo, String> {
     })
 }
 
+fn validate_compatible_cli(executable: &Path) -> Result<CliInfo, String> {
+    let cli = validate_cli(executable)?;
+    if !cli.app_server_supported {
+        return Err("설치된 Codex CLI가 app-server를 지원하지 않습니다.".to_string());
+    }
+    Ok(cli)
+}
+
 fn parse_codex_version(value: &str) -> Option<(u64, u64, u64)> {
     let version = value.split_whitespace().find(|part| {
         part.chars()
@@ -641,23 +643,30 @@ impl Drop for RpcProcess {
 mod tests {
     use super::*;
     use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn fake_cli() -> (PathBuf, PathBuf, PathBuf) {
-        let directory = env::temp_dir().join(format!(
-            "quota-pacer-test-{}-{}",
-            std::process::id(),
-            crate::usage::unix_timestamp()
-        ));
+        fake_cli_with_app_server_support(true)
+    }
+
+    fn fake_cli_with_app_server_support(app_server_supported: bool) -> (PathBuf, PathBuf, PathBuf) {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory =
+            env::temp_dir().join(format!("quota-pacer-test-{}-{}", std::process::id(), nonce));
         fs::create_dir_all(&directory).unwrap();
         let script = directory.join("fake-codex.mjs");
         let log = directory.join("protocol.log");
         let log_literal = serde_json::to_string(&log.to_string_lossy()).unwrap();
+        let help_exit_code = i32::from(!app_server_supported);
         let source = format!(
             r#"import fs from "node:fs";
 import readline from "node:readline";
 const args = process.argv.slice(2);
 if (args.includes("--version")) {{ console.log("codex-cli 0.144.6"); process.exit(0); }}
-if (args[0] === "app-server" && args.includes("--help")) {{ console.log("Usage: codex app-server --stdio"); process.exit(0); }}
+if (args[0] === "app-server" && args.includes("--help")) {{ console.log("Usage: codex app-server --stdio"); process.exit({help_exit_code}); }}
 const log = {log_literal};
 const input = readline.createInterface({{ input: process.stdin }});
 input.on("line", (line) => {{
@@ -709,6 +718,16 @@ input.on("line", (line) => {{
         assert_eq!(parse_codex_version("codex-cli 0.144.6"), Some((0, 144, 6)));
         assert_eq!(parse_codex_version("codex-cli 1.2.3"), Some((1, 2, 3)));
         assert_eq!(parse_codex_version("unknown"), None);
+    }
+
+    #[test]
+    fn selected_cli_must_support_app_server_before_it_is_accepted() {
+        let (directory, executable, _) = fake_cli_with_app_server_support(false);
+
+        let error = inspect_cli(Some(executable)).unwrap_err();
+
+        assert!(error.contains("app-server를 지원하지 않습니다"));
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

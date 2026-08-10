@@ -37,6 +37,14 @@ type OverlaySize = "small" | "middle" | "large";
 const INITIAL_PACE_STATE: PaceViewState = { windows: [], updatedAt: null };
 const PLAN_DEVIATION_RANGE = 20;
 
+interface CliRecoveryActions {
+  configuredPath: string | null;
+  error: string | null;
+  pending: boolean;
+  choose: () => Promise<void>;
+  useAutomatic: () => Promise<void>;
+}
+
 function isOverlaySize(value: unknown): value is OverlaySize {
   return value === "small" || value === "middle" || value === "large";
 }
@@ -64,6 +72,16 @@ function errorTitle(connection: UsageViewState["connection"]) {
   }
 }
 
+function canRecoverCli(connection: UsageViewState["connection"]) {
+  return connection === "cli_missing" || connection === "cli_unsupported";
+}
+
+function cliActionErrorMessage(error: unknown) {
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message;
+  return "Codex CLI 설정을 변경하지 못했습니다.";
+}
+
 function windowLabel(window: UsageWindow) {
   const duration = formatWindowDuration(window.windowDurationMins);
   return window.bucketLabel ? `${duration} · ${window.bucketLabel}` : duration;
@@ -84,9 +102,11 @@ function WindowHeadingLabel({ window }: { window: UsageWindow }) {
 function EmptySurface({
   usage,
   compact = false,
+  recovery,
 }: {
   usage: UsageViewState;
   compact?: boolean;
+  recovery?: CliRecoveryActions;
 }) {
   const title =
     usage.connection === "starting"
@@ -103,22 +123,67 @@ function EmptySurface({
         </div>
         <div className="small-copy">
           <strong>Codex</strong>
-          <small>
-            {usage.connection === "starting" ? "확인 중" : "상태 확인"}
-          </small>
+          {recovery ? (
+            <button
+              type="button"
+              className="cli-recovery-compact"
+              disabled={recovery.pending}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => void recovery.choose()}
+            >
+              {recovery.pending ? "확인 중" : "CLI 선택"}
+            </button>
+          ) : (
+            <small>
+              {usage.connection === "starting" ? "확인 중" : "상태 확인"}
+            </small>
+          )}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="empty-surface">
-      <strong>
-        <span className="brand-label">Codex</span>
-        <span aria-hidden="true"> · </span>
-        <span>{title}</span>
-      </strong>
-      <small>{usage.errorMessage ?? "Codex 계정 상태를 확인합니다"}</small>
+    <div className={`empty-surface ${recovery ? "is-actionable" : ""}`}>
+      <div className="empty-surface-copy">
+        <strong>
+          <span className="brand-label">Codex</span>
+          <span aria-hidden="true"> · </span>
+          <span>{title}</span>
+        </strong>
+        <small>
+          {recovery?.error ??
+            usage.errorMessage ??
+            "Codex 계정 상태를 확인합니다"}
+        </small>
+      </div>
+      {recovery && (
+        <div className="cli-recovery-actions">
+          <button
+            type="button"
+            disabled={recovery.pending}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => void recovery.choose()}
+          >
+            {recovery.pending
+              ? "확인 중"
+              : usage.connection === "cli_unsupported"
+                ? "다른 CLI 선택"
+                : "CLI 선택"}
+          </button>
+          {recovery.configuredPath && (
+            <button
+              type="button"
+              className="is-secondary"
+              disabled={recovery.pending}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => void recovery.useAutomatic()}
+            >
+              자동 탐지
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -143,12 +208,16 @@ function SmallOverlay({
   usage,
   featured,
   pace,
+  recovery,
 }: {
   usage: UsageViewState;
   featured: UsageWindow | null;
   pace: PaceWindowView | undefined;
+  recovery?: CliRecoveryActions;
 }) {
-  if (!featured) return <EmptySurface usage={usage} compact />;
+  if (!featured) {
+    return <EmptySurface usage={usage} compact recovery={recovery} />;
+  }
 
   const plannedRemaining = plannedRemainingPercent(pace);
   const planLabel =
@@ -196,12 +265,14 @@ function MiddleOverlay({
   usage,
   featured,
   pace,
+  recovery,
 }: {
   usage: UsageViewState;
   featured: UsageWindow | null;
   pace: PaceWindowView | undefined;
+  recovery?: CliRecoveryActions;
 }) {
-  if (!featured) return <EmptySurface usage={usage} />;
+  if (!featured) return <EmptySurface usage={usage} recovery={recovery} />;
 
   const plannedRemaining = plannedRemainingPercent(pace);
   const planLabel =
@@ -546,15 +617,8 @@ function DeviationPlanGauge({
   const markerPercent = 50 + normalized * 50;
   const nearPlanWidth = (1 / PLAN_DEVIATION_RANGE) * 100;
   const clipped = Math.abs(delta) > PLAN_DEVIATION_RANGE;
-  const colorStage = planColorStage(
-    delta,
-    plannedPercent,
-    pace?.planBreakdown,
-  );
-  const stageBands = deviationStageBands(
-    plannedPercent,
-    pace?.planBreakdown,
-  );
+  const colorStage = planColorStage(delta, plannedPercent, pace?.planBreakdown);
+  const stageBands = deviationStageBands(plannedPercent, pace?.planBreakdown);
   const direction = delta > 1 ? "over" : delta < -1 ? "under" : "near";
 
   return (
@@ -905,17 +969,21 @@ function LargeOverlay({
   usage,
   pace,
   planVisualization,
+  recovery,
 }: {
   usage: UsageViewState;
   pace: PaceViewState;
   planVisualization: LargePlanVisualization;
+  recovery?: CliRecoveryActions;
 }) {
   const windows = useMemo(() => sortedWindows(usage.windows), [usage.windows]);
   const paceByWindow = useMemo(
     () => new Map(pace.windows.map((window) => [window.windowId, window])),
     [pace.windows],
   );
-  if (windows.length === 0) return <EmptySurface usage={usage} />;
+  if (windows.length === 0) {
+    return <EmptySurface usage={usage} recovery={recovery} />;
+  }
 
   return (
     <div
@@ -955,6 +1023,11 @@ function App() {
   const [opacity, setOpacity] = useState(DEFAULT_OVERLAY_OPACITY);
   const [appearancePhase, setAppearancePhase] =
     useState<OverlayAppearancePhase>("committed");
+  const [configuredCliPath, setConfiguredCliPath] = useState<string | null>(
+    null,
+  );
+  const [cliActionError, setCliActionError] = useState<string | null>(null);
+  const [cliActionPending, setCliActionPending] = useState(false);
   const [sizeReady, setSizeReady] = useState(false);
   const draggingRef = useRef(false);
   const lastAppearanceUpdateIdRef = useRef(-1);
@@ -1003,12 +1076,30 @@ function App() {
       multiple: false,
       directory: false,
       title: "Codex CLI 실행 파일 선택",
-      filters: [
-        { name: "Codex CLI", extensions: ["exe", "cmd", "bat", "ps1"] },
-      ],
     });
     if (typeof path !== "string") return;
-    await invoke<CliInfo>("set_codex_executable", { path });
+    setCliActionPending(true);
+    setCliActionError(null);
+    try {
+      await invoke<CliInfo>("set_codex_executable", { path });
+      setConfiguredCliPath(path);
+    } catch (error) {
+      setCliActionError(cliActionErrorMessage(error));
+    } finally {
+      setCliActionPending(false);
+    }
+  }, []);
+  const useAutomaticCli = useCallback(async () => {
+    setCliActionPending(true);
+    setCliActionError(null);
+    try {
+      await invoke("clear_codex_executable");
+      setConfiguredCliPath(null);
+    } catch (error) {
+      setCliActionError(cliActionErrorMessage(error));
+    } finally {
+      setCliActionPending(false);
+    }
   }, []);
   const showContextMenu = useCallback(
     (event: React.MouseEvent<HTMLElement>) => {
@@ -1029,6 +1120,9 @@ function App() {
       invoke<OverlayAppearanceUpdate>("get_effective_overlay_appearance").then(
         applyAppearanceUpdate,
       ),
+      invoke<string | null>("get_codex_executable_preference").then((path) => {
+        setConfiguredCliPath(typeof path === "string" ? path : null);
+      }),
     ]).finally(() => setSizeReady(true));
     const unlistenUsage = listen<UsageViewState>(
       "usage://state-changed",
@@ -1048,15 +1142,13 @@ function App() {
       "pace://state-changed",
       (event) => setPace(event.payload),
     );
-    const unlistenPickCli = listen("usage://pick-cli", () => void chooseCli());
     return () => {
       void unlistenUsage.then((unlisten) => unlisten());
       void unlistenOverlaySize.then((unlisten) => unlisten());
       void unlistenOverlayAppearance.then((unlisten) => unlisten());
       void unlistenPace.then((unlisten) => unlisten());
-      void unlistenPickCli.then((unlisten) => unlisten());
     };
-  }, [applyAppearanceUpdate, chooseCli]);
+  }, [applyAppearanceUpdate]);
 
   useEffect(() => {
     if (!sizeReady) return;
@@ -1069,6 +1161,15 @@ function App() {
   const featured = featuredWindow(usage);
   const featuredPace = featured
     ? pace.windows.find((window) => window.windowId === featured.id)
+    : undefined;
+  const cliRecovery = canRecoverCli(usage.connection)
+    ? {
+        configuredPath: configuredCliPath,
+        error: cliActionError,
+        pending: cliActionPending,
+        choose: chooseCli,
+        useAutomatic: useAutomaticCli,
+      }
     : undefined;
 
   return (
@@ -1087,14 +1188,25 @@ function App() {
       title="드래그하여 이동 · 우클릭하여 메뉴 열기"
     >
       {sizeMode === "small" ? (
-        <SmallOverlay usage={usage} featured={featured} pace={featuredPace} />
+        <SmallOverlay
+          usage={usage}
+          featured={featured}
+          pace={featuredPace}
+          recovery={cliRecovery}
+        />
       ) : sizeMode === "middle" ? (
-        <MiddleOverlay usage={usage} featured={featured} pace={featuredPace} />
+        <MiddleOverlay
+          usage={usage}
+          featured={featured}
+          pace={featuredPace}
+          recovery={cliRecovery}
+        />
       ) : (
         <LargeOverlay
           usage={usage}
           pace={pace}
           planVisualization={largePlanVisualization}
+          recovery={cliRecovery}
         />
       )}
     </main>
