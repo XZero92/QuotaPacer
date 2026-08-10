@@ -10,10 +10,26 @@
   --color-marker: #f6f7f9;
   --color-primary-text: #f6f7f9;
   --color-secondary-text: #aeb4bd;
-  font-family: Inter, "Pretendard Variable", "Segoe UI", system-ui, sans-serif;
+  font-family:
+    "Pretendard Variable",
+    Pretendard,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    "Apple SD Gothic Neo",
+    "Noto Sans KR",
+    "Malgun Gothic",
+    "Apple Color Emoji",
+    "Segoe UI Emoji",
+    "Segoe UI Symbol",
+    sans-serif;
   color: var(--color-primary-text);
   background: transparent;
   font-synthesis: none;
+  font-variant-numeric: tabular-nums;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
@@ -139,9 +155,10 @@ body,
 .small-ring > strong {
   position: relative;
   z-index: 1;
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.03em;
 }
 
 .small-copy {
@@ -153,7 +170,8 @@ body,
 
 .small-copy strong {
   overflow: hidden;
-  font-size: 16px;
+  font-size: 14px;
+  font-weight: 700;
   letter-spacing: 0.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -164,6 +182,7 @@ body,
   color: #8d949e;
   font-size: 12px;
   font-weight: 600;
+  line-height: 1.2;
 }
 
 .cli-recovery-compact {
@@ -239,7 +258,8 @@ body,
 .middle-heading {
   min-width: 0;
   padding-right: 34px;
-  font-size: 15px;
+  font-size: 14px;
+  line-height: 18px;
 }
 
 .middle-heading strong {
@@ -264,14 +284,15 @@ body,
   flex: 1;
   overflow: hidden;
   color: #858d98;
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .middle-remaining {
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -629,10 +650,6 @@ body,
   white-space: nowrap;
 }
 
-.pace-row.status-earlyRisk .pace-summary strong {
-  font-size: 13px;
-}
-
 .pace-summary i {
   flex: 0 0 auto;
   padding: 2px 6px;
@@ -714,9 +731,9 @@ body,
 .deviation-labels {
   display: grid;
   margin-top: 1px;
-  color: #777f8a;
-  font-size: 11px;
-  line-height: 14px;
+  color: #8d949e;
+  font-size: 12px;
+  line-height: 15px;
   grid-template-columns: 1fr 1fr 1fr;
 }
 
@@ -846,8 +863,8 @@ body,
   height: 14px;
   margin-top: 1px;
   align-items: end;
-  color: #777f8a;
-  font-size: 10px;
+  color: #8d949e;
+  font-size: 11px;
 }
 
 .allocation-labels span {
@@ -1105,7 +1122,7 @@ body,
   color: #b9d1ff;
   cursor: pointer;
   font: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
 }

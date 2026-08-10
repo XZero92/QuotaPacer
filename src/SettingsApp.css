@@ -115,6 +115,9 @@ input {
 .segmented button {
   padding: 8px;
   color: #9da5af;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
   background: transparent;
   border-radius: 8px;
 }
@@ -152,6 +155,8 @@ input {
   height: 34px;
   padding: 0 22px 0 8px;
   color: #f3f5f7;
+  font-size: 14px;
+  line-height: 1;
   background: #191c22;
   border: 1px solid #3a404a;
   border-radius: 8px;
@@ -161,8 +166,8 @@ input {
   position: absolute;
   right: 8px;
   bottom: 9px;
-  color: #727b87;
-  font-size: 11px;
+  color: #979faa;
+  font-size: 12px;
   pointer-events: none;
 }
 
