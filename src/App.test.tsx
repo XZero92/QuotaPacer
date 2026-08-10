@@ -155,6 +155,10 @@ describe("Codex 사용량 오버레이", () => {
     expect(capsule).toHaveClass("small-card");
     expect(capsule).toHaveTextContent("Codex");
     expect(capsule).toHaveTextContent("주간");
+    expect(
+      getComputedStyle(capsule.querySelector(".small-copy") as HTMLElement)
+        .paddingRight,
+    ).toBe("0");
     expect(gauge).toHaveTextContent("74%");
     expect(gauge).toHaveStyle({
       "--remaining": "74",
@@ -186,7 +190,12 @@ describe("Codex 사용량 오버레이", () => {
 
     expect(await screen.findByText("주간")).toBeInTheDocument();
     expect(screen.getByText("Codex")).toBeInTheDocument();
-    expect(screen.getByText("74% 남음")).toBeInTheDocument();
+    const remaining = screen.getByText("74% 남음");
+    expect(remaining).toHaveClass("middle-remaining");
+    expect(remaining.closest(".middle-footer")).toBeInTheDocument();
+    expect(
+      screen.getByText("주간").closest(".middle-heading"),
+    ).not.toContainElement(remaining);
     const meter = screen.getByLabelText(
       "74% 남음, 현재 시각 계획 기준 57% 남음",
     );
@@ -201,6 +210,37 @@ describe("Codex 사용량 오버레이", () => {
     expect(
       screen.queryByRole("region", { name: "Codex 사용량 상세" }),
     ).not.toBeInTheDocument();
+  });
+
+  it.each(["small", "middle", "large"] as const)(
+    "%s은 더보기 메뉴 진입점을 제공한다",
+    async (size) => {
+      mockStartup(size);
+      render(<App />);
+
+      const button = await screen.findByRole("button", { name: "더보기 메뉴" });
+      expect(button).toHaveAttribute("aria-haspopup", "menu");
+    },
+  );
+
+  it("빈 상태와 CLI 오류 상태에서도 더보기 메뉴를 제공한다", async () => {
+    mockStartup("middle", {
+      ...weeklyOnly,
+      connection: "no_limits",
+      windows: [],
+      featuredWindowId: null,
+    });
+    const firstRender = render(<App />);
+    expect(
+      await screen.findByRole("button", { name: "더보기 메뉴" }),
+    ).toBeInTheDocument();
+    firstRender.unmount();
+
+    mockStartup("middle", cliMissing);
+    render(<App />);
+    expect(
+      await screen.findByRole("button", { name: "더보기 메뉴" }),
+    ).toBeInTheDocument();
   });
 
   it("CLI를 찾지 못하면 확장자 제한 없는 복구 선택을 제공한다", async () => {
@@ -405,8 +445,11 @@ describe("Codex 사용량 오버레이", () => {
     expect(
       await screen.findByRole("region", { name: "Codex 페이스 예측" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Codex Pace")).toBeInTheDocument();
-    expect(screen.getByLabelText("최신 사용량")).toBeInTheDocument();
+    const titleStatus = screen.getByText("Codex Pace").parentElement;
+    expect(titleStatus).toHaveClass("pace-list-title-status");
+    expect(
+      within(titleStatus as HTMLElement).getByLabelText("최신 사용량"),
+    ).toBeInTheDocument();
     expect(screen.queryByText("최신 사용량")).not.toBeInTheDocument();
     expect(screen.queryByText(/^Codex$/)).not.toBeInTheDocument();
     expect(screen.getByText("계획상 17%p 여유")).toBeInTheDocument();
@@ -866,12 +909,36 @@ describe("Codex 사용량 오버레이", () => {
   it("우클릭하면 네이티브 오버레이 메뉴를 요청한다", async () => {
     render(<App />);
     const overlay = await screen.findByTitle(
-      "드래그하여 이동 · 우클릭하여 메뉴 열기",
+      "드래그하여 이동 · 우클릭 또는 더보기로 메뉴 열기",
     );
 
     fireEvent.contextMenu(overlay);
 
     expect(mocks.invoke).toHaveBeenCalledWith("show_overlay_context_menu");
+  });
+
+  it("더보기 버튼은 드래그하지 않고 버튼 아래에 네이티브 메뉴를 연다", async () => {
+    render(<App />);
+    const button = await screen.findByRole("button", { name: "더보기 메뉴" });
+    vi.spyOn(button, "getBoundingClientRect").mockReturnValue({
+      x: 244,
+      y: 6,
+      left: 244,
+      top: 6,
+      right: 272,
+      bottom: 34,
+      width: 28,
+      height: 28,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(button, { button: 0 });
+    expect(mocks.startDragging).not.toHaveBeenCalled();
+
+    fireEvent.click(button);
+    expect(mocks.invoke).toHaveBeenCalledWith("show_overlay_context_menu", {
+      position: { x: 244, y: 34 },
+    });
   });
 
   it("트레이 크기 변경 이벤트를 즉시 반영한다", async () => {
@@ -903,7 +970,7 @@ describe("Codex 사용량 오버레이", () => {
     });
     render(<App />);
     const overlay = await screen.findByTitle(
-      "드래그하여 이동 · 우클릭하여 메뉴 열기",
+      "드래그하여 이동 · 우클릭 또는 더보기로 메뉴 열기",
     );
 
     expect(overlay).toHaveStyle({ "--overlay-opacity": "0.65" });
@@ -1027,7 +1094,10 @@ describe("Codex 사용량 오버레이", () => {
       name: "Codex 페이스 예측",
     });
     expect(large).toHaveClass("is-stale");
-    expect(large).toHaveTextContent("업데이트 지연 · 2분 전");
+    expect(large).toHaveTextContent("2분 전");
+    expect(
+      within(large).getByLabelText("업데이트 지연 · 2분 전"),
+    ).toBeInTheDocument();
     expect(getComputedStyle(large).opacity).not.toBe("0.68");
   });
 

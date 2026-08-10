@@ -4,6 +4,8 @@ import {
   featuredWindow,
   formatWindowDuration,
   sortedWindows,
+  staleAgeLabel,
+  staleLabel,
   usageTone,
 } from "./usage";
 
@@ -76,5 +78,16 @@ describe("사용량 표시 규칙", () => {
     expect(usageTone(50)).toBe("warning");
     expect(usageTone(20)).toBe("warning");
     expect(usageTone(19)).toBe("danger");
+  });
+
+  it("stale 경과 시간의 전체 라벨과 축약 라벨을 같은 기준으로 만든다", () => {
+    const now = 180_000;
+
+    expect(staleAgeLabel(180, now)).toBe("0분 전");
+    expect(staleLabel(180, now)).toBe("업데이트 지연 · 0분 전");
+    expect(staleAgeLabel(60, now)).toBe("2분 전");
+    expect(staleLabel(60, now)).toBe("업데이트 지연 · 2분 전");
+    expect(staleAgeLabel(null, now)).toBeNull();
+    expect(staleLabel(null, now)).toBe("업데이트 지연");
   });
 });

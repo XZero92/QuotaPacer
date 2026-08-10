@@ -28,6 +28,7 @@ import {
   formatWindowDuration,
   INITIAL_USAGE_STATE,
   sortedWindows,
+  staleAgeLabel,
   staleLabel,
   usageTone,
 } from "./usage";
@@ -43,6 +44,11 @@ interface CliRecoveryActions {
   pending: boolean;
   choose: () => Promise<void>;
   useAutomatic: () => Promise<void>;
+}
+
+interface OverlayMenuPosition {
+  x: number;
+  y: number;
 }
 
 function isOverlaySize(value: unknown): value is OverlaySize {
@@ -99,14 +105,43 @@ function WindowHeadingLabel({ window }: { window: UsageWindow }) {
   );
 }
 
+function MoreMenuButton({
+  onOpen,
+}: {
+  onOpen: (position: OverlayMenuPosition) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="more-menu-button"
+      aria-label="더보기 메뉴"
+      aria-haspopup="menu"
+      title="더보기 메뉴"
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        const bounds = event.currentTarget.getBoundingClientRect();
+        onOpen({ x: bounds.left, y: bounds.bottom });
+      }}
+    >
+      <svg viewBox="0 0 16 4" aria-hidden="true">
+        <circle cx="2" cy="2" r="1.5" />
+        <circle cx="8" cy="2" r="1.5" />
+        <circle cx="14" cy="2" r="1.5" />
+      </svg>
+    </button>
+  );
+}
+
 function EmptySurface({
   usage,
   compact = false,
   recovery,
+  onOpenMenu,
 }: {
   usage: UsageViewState;
   compact?: boolean;
   recovery?: CliRecoveryActions;
+  onOpenMenu: (position: OverlayMenuPosition) => void;
 }) {
   const title =
     usage.connection === "starting"
@@ -139,6 +174,7 @@ function EmptySurface({
             </small>
           )}
         </div>
+        <MoreMenuButton onOpen={onOpenMenu} />
       </div>
     );
   }
@@ -184,6 +220,7 @@ function EmptySurface({
           )}
         </div>
       )}
+      <MoreMenuButton onOpen={onOpenMenu} />
     </div>
   );
 }
@@ -209,14 +246,23 @@ function SmallOverlay({
   featured,
   pace,
   recovery,
+  onOpenMenu,
 }: {
   usage: UsageViewState;
   featured: UsageWindow | null;
   pace: PaceWindowView | undefined;
   recovery?: CliRecoveryActions;
+  onOpenMenu: (position: OverlayMenuPosition) => void;
 }) {
   if (!featured) {
-    return <EmptySurface usage={usage} compact recovery={recovery} />;
+    return (
+      <EmptySurface
+        usage={usage}
+        compact
+        recovery={recovery}
+        onOpenMenu={onOpenMenu}
+      />
+    );
   }
 
   const plannedRemaining = plannedRemainingPercent(pace);
@@ -257,6 +303,7 @@ function SmallOverlay({
       {usage.connection === "stale" && (
         <i className="stale-dot" aria-hidden="true" />
       )}
+      <MoreMenuButton onOpen={onOpenMenu} />
     </div>
   );
 }
@@ -266,13 +313,23 @@ function MiddleOverlay({
   featured,
   pace,
   recovery,
+  onOpenMenu,
 }: {
   usage: UsageViewState;
   featured: UsageWindow | null;
   pace: PaceWindowView | undefined;
   recovery?: CliRecoveryActions;
+  onOpenMenu: (position: OverlayMenuPosition) => void;
 }) {
-  if (!featured) return <EmptySurface usage={usage} recovery={recovery} />;
+  if (!featured) {
+    return (
+      <EmptySurface
+        usage={usage}
+        recovery={recovery}
+        onOpenMenu={onOpenMenu}
+      />
+    );
+  }
 
   const plannedRemaining = plannedRemainingPercent(pace);
   const planLabel =
@@ -284,9 +341,6 @@ function MiddleOverlay({
     <div className="middle-card">
       <div className="middle-heading">
         <WindowHeadingLabel window={featured} />
-        <span className={`tone-text-${usageTone(featured.remainingPercent)}`}>
-          {featured.remainingPercent}% 남음
-        </span>
       </div>
       <div
         className="usage-meter"
@@ -304,11 +358,20 @@ function MiddleOverlay({
           />
         )}
       </div>
-      <small>
-        {usage.connection === "stale"
-          ? staleLabel(usage.lastSuccessfulAt)
-          : `${formatResetTime(featured.resetsAt)} 리셋`}
-      </small>
+      <div className="middle-footer">
+        <small>
+          {usage.connection === "stale"
+            ? staleLabel(usage.lastSuccessfulAt)
+            : `${formatResetTime(featured.resetsAt)} 리셋`}
+        </small>
+        <span
+          className={`middle-remaining tone-text-${usageTone(featured.remainingPercent)}`}
+          aria-hidden="true"
+        >
+          {featured.remainingPercent}% 남음
+        </span>
+      </div>
+      <MoreMenuButton onOpen={onOpenMenu} />
     </div>
   );
 }
@@ -983,6 +1046,7 @@ function LargeOverlay({
   planVisualizationError,
   onPlanVisualizationChange,
   recovery,
+  onOpenMenu,
 }: {
   usage: UsageViewState;
   pace: PaceViewState;
@@ -993,6 +1057,7 @@ function LargeOverlay({
     visualization: LargePlanVisualization,
   ) => void;
   recovery?: CliRecoveryActions;
+  onOpenMenu: (position: OverlayMenuPosition) => void;
 }) {
   const windows = useMemo(() => sortedWindows(usage.windows), [usage.windows]);
   const paceByWindow = useMemo(
@@ -1012,8 +1077,16 @@ function LargeOverlay({
     ? `표시 방식 저장 실패: ${planVisualizationError}`
     : `현재 7일 계획 표시: ${currentVisualizationLabel}. 클릭하면 ${nextVisualizationAction} 전환합니다.`;
   if (windows.length === 0) {
-    return <EmptySurface usage={usage} recovery={recovery} />;
+    return (
+      <EmptySurface
+        usage={usage}
+        recovery={recovery}
+        onOpenMenu={onOpenMenu}
+      />
+    );
   }
+
+  const compactStaleAge = staleAgeLabel(usage.lastSuccessfulAt) ?? "지연";
 
   return (
     <div
@@ -1022,7 +1095,20 @@ function LargeOverlay({
       aria-label="Codex 페이스 예측"
     >
       <header className="pace-list-header">
-        <strong>Codex Pace</strong>
+        <div className="pace-list-title-status">
+          <strong>Codex Pace</strong>
+          {usage.connection === "stale" ? (
+            <span
+              className="pace-freshness-status is-stale"
+              aria-label={staleLabel(usage.lastSuccessfulAt)}
+            >
+              <i className="pace-freshness" aria-hidden="true" />
+              <small aria-hidden="true">{compactStaleAge}</small>
+            </span>
+          ) : (
+            <span className="pace-freshness" aria-label="최신 사용량" />
+          )}
+        </div>
         <div className="pace-list-header-actions">
           {canTogglePlanVisualization && (
             <button
@@ -1051,11 +1137,7 @@ function LargeOverlay({
               )}
             </button>
           )}
-          {usage.connection === "stale" ? (
-            <small>{staleLabel(usage.lastSuccessfulAt)}</small>
-          ) : (
-            <span className="pace-freshness" aria-label="최신 사용량" />
-          )}
+          <MoreMenuButton onOpen={onOpenMenu} />
           {planVisualizationError && (
             <span
               id="large-plan-toggle-error"
@@ -1204,6 +1286,9 @@ function App() {
     },
     [],
   );
+  const showMenuAt = useCallback((position: OverlayMenuPosition) => {
+    void invoke("show_overlay_context_menu", { position });
+  }, []);
 
   useEffect(() => {
     void invoke<UsageViewState>("get_usage_state").then(setUsage);
@@ -1280,7 +1365,7 @@ function App() {
       data-tauri-drag-region
       onPointerDown={startDragging}
       onContextMenu={showContextMenu}
-      title="드래그하여 이동 · 우클릭하여 메뉴 열기"
+      title="드래그하여 이동 · 우클릭 또는 더보기로 메뉴 열기"
     >
       {sizeMode === "small" ? (
         <SmallOverlay
@@ -1288,6 +1373,7 @@ function App() {
           featured={featured}
           pace={featuredPace}
           recovery={cliRecovery}
+          onOpenMenu={showMenuAt}
         />
       ) : sizeMode === "middle" ? (
         <MiddleOverlay
@@ -1295,6 +1381,7 @@ function App() {
           featured={featured}
           pace={featuredPace}
           recovery={cliRecovery}
+          onOpenMenu={showMenuAt}
         />
       ) : (
         <LargeOverlay
@@ -1307,6 +1394,7 @@ function App() {
             void changePlanVisualization(visualization)
           }
           recovery={cliRecovery}
+          onOpenMenu={showMenuAt}
         />
       )}
     </main>

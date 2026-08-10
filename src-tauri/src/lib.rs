@@ -19,8 +19,8 @@ use tauri::menu::{
 };
 use tauri::tray::TrayIconBuilder;
 use tauri::{
-    Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow,
-    WindowEvent, Wry,
+    Emitter, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State,
+    WebviewWindow, WindowEvent, Wry,
 };
 use usage::UsageViewState;
 
@@ -243,6 +243,25 @@ struct OverlayMenus {
     context_sizes: SizeMenuItems,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+struct OverlayMenuPosition {
+    x: f64,
+    y: f64,
+}
+
+fn validated_overlay_menu_position(
+    position: Option<OverlayMenuPosition>,
+) -> Option<LogicalPosition<f64>> {
+    position
+        .filter(|position| {
+            position.x.is_finite()
+                && position.y.is_finite()
+                && position.x >= 0.0
+                && position.y >= 0.0
+        })
+        .map(|position| LogicalPosition::new(position.x, position.y))
+}
+
 impl OverlayMenus {
     fn sync(&self, selected: OverlaySize) -> tauri::Result<()> {
         self.tray_sizes.sync(selected)?;
@@ -437,12 +456,14 @@ fn emit_appearance_update(app: &tauri::AppHandle, update: OverlayAppearanceUpdat
 fn show_overlay_context_menu(
     window: WebviewWindow,
     menus: State<'_, OverlayMenus>,
+    position: Option<OverlayMenuPosition>,
 ) -> Result<(), String> {
-    window
-        .as_ref()
-        .window()
-        .popup_menu(&menus.context)
-        .map_err(|error| error.to_string())
+    let window = window.as_ref().window();
+    match validated_overlay_menu_position(position) {
+        Some(position) => window.popup_menu_at(&menus.context, position),
+        None => window.popup_menu(&menus.context),
+    }
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -567,18 +588,15 @@ fn setup_menus(app: &mut tauri::App, selected: OverlaySize) -> tauri::Result<Ove
     let (context_size_menu, context_sizes) = build_size_submenu(app, "context", selected)?;
     let context_refresh = MenuItemBuilder::with_id("context-refresh", "새로고침").build(app)?;
     let context_pace_settings =
-        MenuItemBuilder::with_id("context-pace-settings", "설정").build(app)?;
-    let context_hide = MenuItemBuilder::with_id("context-hide", "숨기기").build(app)?;
-    let context_quit = MenuItemBuilder::with_id("context-quit", "종료").build(app)?;
+        MenuItemBuilder::with_id("context-pace-settings", "설정…").build(app)?;
+    let context_hide = MenuItemBuilder::with_id("context-hide", "오버레이 숨기기").build(app)?;
+    let context_quit = MenuItemBuilder::with_id("context-quit", "QuotaPacer 종료").build(app)?;
     let context = MenuBuilder::new(app)
         .item(&context_size_menu)
         .separator()
-        .items(&[
-            &context_refresh,
-            &context_pace_settings,
-            &context_hide,
-            &context_quit,
-        ])
+        .items(&[&context_refresh, &context_pace_settings, &context_hide])
+        .separator()
+        .item(&context_quit)
         .build()?;
 
     let mut builder = TrayIconBuilder::with_id("main-tray")
@@ -856,7 +874,8 @@ fn show_settings_window(app: &tauri::AppHandle) {
 mod tests {
     use super::{
         anchored_position, is_pace_settings_menu_id, overlay_dimensions, overlay_size_from_menu_id,
-        OverlayAppearance, OverlayAppearancePhase, OverlayAppearancePreviewController,
+        validated_overlay_menu_position, OverlayAppearance, OverlayAppearancePhase,
+        OverlayAppearancePreviewController, OverlayMenuPosition,
     };
     use crate::settings::{LargePlanVisualization, OverlaySize};
     use tauri::{PhysicalPosition, PhysicalSize};
@@ -906,6 +925,29 @@ mod tests {
         assert!(is_pace_settings_menu_id("tray-pace-settings"));
         assert!(is_pace_settings_menu_id("context-pace-settings"));
         assert!(!is_pace_settings_menu_id("tray-refresh"));
+    }
+
+    #[test]
+    fn overlay_menu_position_accepts_logical_coordinates_and_rejects_invalid_values() {
+        let position =
+            validated_overlay_menu_position(Some(OverlayMenuPosition { x: 244.0, y: 34.0 }))
+                .unwrap();
+        assert_eq!((position.x, position.y), (244.0, 34.0));
+
+        for position in [
+            OverlayMenuPosition { x: -1.0, y: 0.0 },
+            OverlayMenuPosition {
+                x: f64::NAN,
+                y: 0.0,
+            },
+            OverlayMenuPosition {
+                x: 0.0,
+                y: f64::INFINITY,
+            },
+        ] {
+            assert!(validated_overlay_menu_position(Some(position)).is_none());
+        }
+        assert!(validated_overlay_menu_position(None).is_none());
     }
 
     #[test]

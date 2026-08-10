@@ -57,11 +57,19 @@ export function usageTone(remainingPercent: number) {
   return "normal";
 }
 
-export function staleLabel(lastSuccessfulAt: number | null, now = Date.now()) {
-  if (lastSuccessfulAt === null) return "업데이트 지연";
+export function staleAgeLabel(
+  lastSuccessfulAt: number | null,
+  now = Date.now(),
+) {
+  if (lastSuccessfulAt === null) return null;
   const minutes = Math.max(
     0,
     Math.floor((now - lastSuccessfulAt * 1_000) / 60_000),
   );
-  return `업데이트 지연 · ${minutes}분 전`;
+  return `${minutes}분 전`;
+}
+
+export function staleLabel(lastSuccessfulAt: number | null, now = Date.now()) {
+  const age = staleAgeLabel(lastSuccessfulAt, now);
+  return age === null ? "업데이트 지연" : `업데이트 지연 · ${age}`;
 }
