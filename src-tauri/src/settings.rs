@@ -23,21 +23,11 @@ pub enum OverlaySize {
     Large,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum PacePlanMode {
-    #[default]
-    Even,
-    Weekday,
-}
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaceSettings {
-    #[serde(default)]
-    pub plan_mode: PacePlanMode,
-    #[serde(default = "default_weekday_allocations")]
-    pub weekday_allocations: [f64; 7],
+    #[serde(default = "default_weekday_weights")]
+    pub weekday_weights: [u8; 7],
     #[serde(default)]
     pub os_notifications_enabled: bool,
 }
@@ -65,8 +55,7 @@ impl EditableSettings {
 impl Default for PaceSettings {
     fn default() -> Self {
         Self {
-            plan_mode: PacePlanMode::Even,
-            weekday_allocations: default_weekday_allocations(),
+            weekday_weights: default_weekday_weights(),
             os_notifications_enabled: false,
         }
     }
@@ -74,25 +63,18 @@ impl Default for PaceSettings {
 
 impl PaceSettings {
     pub fn validate(&self) -> Result<(), String> {
-        if self
-            .weekday_allocations
-            .iter()
-            .any(|value| !value.is_finite() || !(0.0..=100.0).contains(value))
-        {
-            return Err("요일별 배분율은 0~100 사이여야 합니다.".to_string());
+        if self.weekday_weights.iter().any(|weight| *weight > 10) {
+            return Err("요일별 사용 강도는 0~10 사이여야 합니다.".to_string());
         }
-        let total = self.weekday_allocations.iter().sum::<f64>();
-        if (total - 100.0).abs() > 0.1 {
-            return Err(format!(
-                "요일별 배분율 합계는 100%여야 합니다. 현재 합계: {total:.1}%"
-            ));
+        if self.weekday_weights.iter().all(|weight| *weight == 0) {
+            return Err("최소 한 요일의 사용 강도는 1 이상이어야 합니다.".to_string());
         }
         Ok(())
     }
 }
 
-fn default_weekday_allocations() -> [f64; 7] {
-    [14.3, 14.3, 14.3, 14.3, 14.3, 14.3, 14.2]
+fn default_weekday_weights() -> [u8; 7] {
+    [5; 7]
 }
 
 impl OverlaySize {
@@ -308,8 +290,8 @@ pub fn validate_overlay_opacity(opacity: u8) -> Result<(), String> {
 mod tests {
     use super::{
         normalize_overlay_opacity, validate_overlay_opacity, AppSettings, EditableSettings,
-        LargePlanVisualization, OverlaySize, PacePlanMode, PaceSettings, SettingsStore,
-        DEFAULT_OVERLAY_OPACITY, MIN_OVERLAY_OPACITY,
+        LargePlanVisualization, OverlaySize, PaceSettings, SettingsStore, DEFAULT_OVERLAY_OPACITY,
+        MIN_OVERLAY_OPACITY,
     };
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
@@ -323,12 +305,26 @@ mod tests {
         assert_eq!(settings.overlay_size, OverlaySize::Middle);
         assert_eq!(settings.overlay_opacity, DEFAULT_OVERLAY_OPACITY);
         assert_eq!(settings.codex_executable.as_deref(), Some("codex"));
-        assert_eq!(settings.pace.plan_mode, PacePlanMode::Even);
+        assert_eq!(settings.pace.weekday_weights, [5; 7]);
         assert_eq!(
             settings.large_plan_visualization,
             LargePlanVisualization::Deviation
         );
         assert!(!settings.pace.os_notifications_enabled);
+        let serialized = serde_json::to_string(&settings).unwrap();
+        assert!(serialized.contains(r#""weekdayWeights":[5,5,5,5,5,5,5]"#));
+        assert!(!serialized.contains("planMode"));
+        assert!(!serialized.contains("weekdayAllocations"));
+    }
+
+    #[test]
+    fn old_plan_fields_are_ignored_without_migration() {
+        let settings: AppSettings = serde_json::from_str(
+            r#"{"pace":{"planMode":"weekday","weekdayAllocations":[10,10,20,10,20,20,10]}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.pace.weekday_weights, [5; 7]);
     }
 
     #[test]
@@ -396,19 +392,24 @@ mod tests {
     }
 
     #[test]
-    fn pace_settings_require_a_complete_weekday_allocation() {
+    fn pace_settings_require_valid_weekday_weights() {
         let invalid = PaceSettings {
-            plan_mode: PacePlanMode::Weekday,
-            weekday_allocations: [10.0; 7],
+            weekday_weights: [0; 7],
             os_notifications_enabled: true,
         };
-        assert!(invalid.validate().unwrap_err().contains("100%"));
+        assert!(invalid.validate().unwrap_err().contains("최소 한 요일"));
 
         let valid = PaceSettings {
-            weekday_allocations: [10.0, 10.0, 20.0, 10.0, 20.0, 20.0, 10.0],
+            weekday_weights: [10, 10, 0, 10, 0, 10, 0],
             ..invalid
         };
         assert!(valid.validate().is_ok());
+
+        let out_of_range = PaceSettings {
+            weekday_weights: [11, 5, 5, 5, 5, 5, 5],
+            ..valid
+        };
+        assert!(out_of_range.validate().unwrap_err().contains("0~10"));
     }
 
     #[test]

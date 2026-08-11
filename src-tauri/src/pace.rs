@@ -1,4 +1,4 @@
-use crate::settings::{PacePlanMode, PaceSettings, SettingsStore};
+use crate::settings::{PaceSettings, SettingsStore};
 use crate::usage::{ConnectionState, UsageViewState, UsageWindow};
 use chrono::{Datelike, Local, TimeZone};
 use serde::{Deserialize, Serialize};
@@ -268,9 +268,7 @@ fn reset_confirmations_for_settings_change(
 ) {
     if previous.os_notifications_enabled != next.os_notifications_enabled {
         runtime.alert_confirmations.clear();
-    } else if previous.plan_mode != next.plan_mode
-        || previous.weekday_allocations != next.weekday_allocations
-    {
+    } else if previous.weekday_weights != next.weekday_weights {
         for confirmation in runtime.alert_confirmations.values_mut() {
             confirmation.plan_pending_since = None;
         }
@@ -603,10 +601,43 @@ fn weekly_plan_breakdown(
 }
 
 fn weekly_allocations(settings: &PaceSettings, start_weekday: usize) -> [f64; 7] {
-    if settings.plan_mode == PacePlanMode::Even {
-        return [100.0 / 7.0; 7];
+    let allocations = normalized_weekday_allocations(&settings.weekday_weights);
+    std::array::from_fn(|offset| allocations[(start_weekday + offset) % 7])
+}
+
+fn normalized_weekday_allocations(weights: &[u8; 7]) -> [f64; 7] {
+    let fallback = [5; 7];
+    let effective_weights = if weights.iter().all(|weight| *weight == 0) {
+        &fallback
+    } else {
+        weights
+    };
+    let total = effective_weights
+        .iter()
+        .map(|weight| u32::from(*weight))
+        .sum::<u32>();
+    let mut tenths = [0_u16; 7];
+    let mut remainders = [0_u32; 7];
+
+    for (index, weight) in effective_weights.iter().enumerate() {
+        let scaled = u32::from(*weight) * 1000;
+        tenths[index] = (scaled / total) as u16;
+        remainders[index] = scaled % total;
     }
-    std::array::from_fn(|offset| settings.weekday_allocations[(start_weekday + offset) % 7])
+
+    let assigned = tenths.iter().map(|value| u32::from(*value)).sum::<u32>();
+    let remaining = (1000 - assigned) as usize;
+    let mut order = [0, 1, 2, 3, 4, 5, 6];
+    order.sort_by(|left, right| {
+        remainders[*right]
+            .cmp(&remainders[*left])
+            .then_with(|| left.cmp(right))
+    });
+    for index in order.into_iter().take(remaining) {
+        tenths[index] += 1;
+    }
+
+    std::array::from_fn(|index| f64::from(tenths[index]) / 10.0)
 }
 
 fn local_weekday_index(timestamp: i64) -> usize {
@@ -1075,7 +1106,7 @@ mod tests {
     }
 
     #[test]
-    fn even_weekly_plan_interpolates_each_reset_aligned_day() {
+    fn default_weekly_plan_interpolates_each_reset_aligned_day() {
         let resets_at = 7 * DAY_SECONDS;
         let window = weekly_window(0, resets_at);
         let settings = PaceSettings::default();
@@ -1087,19 +1118,19 @@ mod tests {
         let third = planned_used_percent(&window, 2 * DAY_SECONDS, &settings, Some(0)).unwrap();
         let end = planned_used_percent(&window, resets_at, &settings, Some(0)).unwrap();
         assert_eq!(first, 0.0);
-        assert!((first_midpoint - 50.0 / 7.0).abs() < 0.001);
-        assert!((second - 100.0 / 7.0).abs() < 0.001);
-        assert!((third - 200.0 / 7.0).abs() < 0.001);
+        assert!((first_midpoint - 7.15).abs() < 0.001);
+        assert!((second - 14.3).abs() < 0.001);
+        assert!((third - 28.6).abs() < 0.001);
         assert_eq!(end, 100.0);
     }
 
     #[test]
-    fn even_weekly_plan_matches_the_current_real_world_case() {
+    fn default_weekly_plan_matches_the_current_real_world_case() {
         let resets_at = 7 * DAY_SECONDS;
         let window = weekly_window(25, resets_at);
         let planned =
             planned_used_percent(&window, 132_543, &PaceSettings::default(), Some(0)).unwrap();
-        assert!((planned - 21.915_178_571_428_6).abs() < 0.000_001);
+        assert!((planned - 21.937_093_75).abs() < 0.000_001);
     }
 
     #[test]
@@ -1120,7 +1151,7 @@ mod tests {
         assert_eq!(breakdown.segments.len(), 7);
         assert_eq!(breakdown.segments[0].starts_at, 0);
         assert_eq!(breakdown.segments[0].ends_at, DAY_SECONDS);
-        assert!((breakdown.segments[2].cumulative_percent - 300.0 / 7.0).abs() < 0.001);
+        assert!((breakdown.segments[2].cumulative_percent - 42.9).abs() < 0.001);
 
         let short_window = UsageWindow {
             window_duration_mins: Some(300),
@@ -1132,12 +1163,31 @@ mod tests {
     }
 
     #[test]
-    fn weekday_plan_uses_the_weekday_at_the_window_start() {
+    fn weekday_weights_normalize_to_exact_tenths() {
+        assert_eq!(
+            normalized_weekday_allocations(&[5; 7]),
+            [14.3, 14.3, 14.3, 14.3, 14.3, 14.3, 14.2]
+        );
+        assert_eq!(
+            normalized_weekday_allocations(&[8, 8, 8, 8, 8, 5, 5]),
+            [16.0, 16.0, 16.0, 16.0, 16.0, 10.0, 10.0]
+        );
+        assert_eq!(
+            normalized_weekday_allocations(&[4, 4, 4, 4, 4, 10, 10]),
+            [10.0, 10.0, 10.0, 10.0, 10.0, 25.0, 25.0]
+        );
+        assert_eq!(
+            normalized_weekday_allocations(&[0; 7]),
+            [14.3, 14.3, 14.3, 14.3, 14.3, 14.3, 14.2]
+        );
+    }
+
+    #[test]
+    fn weighted_plan_uses_the_weekday_at_the_window_start() {
         let resets_at = 7 * DAY_SECONDS;
         let window = weekly_window(0, resets_at);
         let settings = PaceSettings {
-            plan_mode: PacePlanMode::Weekday,
-            weekday_allocations: [10.0, 10.0, 20.0, 10.0, 20.0, 20.0, 10.0],
+            weekday_weights: [1, 1, 2, 1, 2, 2, 1],
             os_notifications_enabled: false,
         };
 
@@ -1155,8 +1205,7 @@ mod tests {
         let resets_at = 7 * DAY_SECONDS;
         let window = weekly_window(20, resets_at);
         let settings = PaceSettings {
-            plan_mode: PacePlanMode::Weekday,
-            weekday_allocations: [20.0, 0.0, 20.0, 20.0, 20.0, 10.0, 10.0],
+            weekday_weights: [2, 0, 2, 2, 2, 1, 1],
             os_notifications_enabled: false,
         };
 
@@ -1268,7 +1317,7 @@ mod tests {
             },
         );
         let mut changed_plan = previous.clone();
-        changed_plan.plan_mode = PacePlanMode::Weekday;
+        changed_plan.weekday_weights[0] = 6;
         reset_confirmations_for_settings_change(&mut runtime, &previous, &changed_plan);
         let confirmation = &runtime.alert_confirmations["codex:weekly"];
         assert_eq!(confirmation.plan_pending_since, None);

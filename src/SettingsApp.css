@@ -93,98 +93,200 @@ input {
   line-height: 1.5;
 }
 
-.segmented {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  margin: 12px 0;
-  padding: 3px;
-  background: #20242b;
-  border-radius: 10px;
-}
-
-.segmented button,
 .icon-button,
 .secondary-button,
 .primary-button,
-.danger-button {
+.danger-button,
+.weekday-presets button {
   color: inherit;
   cursor: pointer;
   border: 0;
 }
 
-.segmented button {
-  padding: 8px;
-  color: #9da5af;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 18px;
-  background: transparent;
-  border-radius: 8px;
-}
-
-.segmented button.selected {
-  color: #f3f5f7;
-  font-weight: 700;
-  background: #343a43;
-}
-
-.segmented button:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.weekday-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-}
-
-.weekday-grid label {
-  position: relative;
-}
-
-.weekday-grid label > span {
-  display: block;
-  margin-bottom: 3px;
-  color: #9da5af;
-  font-size: 12px;
-}
-
-.weekday-grid input {
-  width: 100%;
-  height: 34px;
-  padding: 0 22px 0 8px;
-  color: #f3f5f7;
-  font-size: 14px;
-  line-height: 1;
-  background: #191c22;
-  border: 1px solid #3a404a;
-  border-radius: 8px;
-}
-
-.weekday-grid label > small {
-  position: absolute;
-  right: 8px;
-  bottom: 9px;
-  color: #979faa;
-  font-size: 12px;
-  pointer-events: none;
-}
-
-.allocation-total,
-.even-plan-summary,
 .permission-state {
   margin: 9px 0 0;
 }
 
-.allocation-total,
-.even-plan-summary {
+.weekly-plan-heading,
+.weekday-editor-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.weekly-plan-heading .section-help {
+  margin-bottom: 0;
+}
+
+.weekly-plan-heading > strong {
+  flex: 0 0 auto;
   color: #72e6ad;
   font-size: 12px;
 }
 
-.allocation-total.is-error {
-  color: #ff767d;
+.weekday-distribution {
+  display: flex;
+  height: 12px;
+  margin-top: 13px;
+  overflow: hidden;
+  background: #2a3037;
+  border-radius: 999px;
+}
+
+.weekday-distribution span {
+  min-width: 0;
+  background: #4cae7d;
+  border-right: 1px solid #111318;
+  transition: width 160ms ease;
+}
+
+.weekday-distribution span:nth-child(even) {
+  background: #66c18f;
+}
+
+.weekday-distribution span:nth-child(n + 6) {
+  background: #d6a158;
+}
+
+.weekday-presets {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.weekday-presets button {
+  padding: 6px 9px;
+  color: #b2bac4;
+  font-size: 12px;
+  background: #20242b;
+  border: 1px solid #3a404a;
+  border-radius: 8px;
+}
+
+.weekday-presets button[aria-pressed="true"] {
+  color: #b8f5d4;
+  background: rgb(73 174 123 / 16%);
+  border-color: #4cae7d;
+}
+
+.weekday-presets button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.weekday-editor {
+  margin-top: 12px;
+  padding: 12px 10px 9px;
+  background: #191c22;
+  border: 1px solid #343a43;
+  border-radius: 12px;
+}
+
+.weekday-editor-heading {
+  align-items: center;
+  margin-bottom: 7px;
+}
+
+.weekday-editor-heading h3 {
+  margin-bottom: 0;
+}
+
+.weekday-editor-heading span,
+.weekday-boundary-help,
+.weekday-weight-status {
+  color: #979faa;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.weekday-equalizer {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.weekday-weight {
+  display: grid;
+  grid-template-rows: 28px 166px auto auto;
+  justify-items: center;
+  min-width: 0;
+  padding: 5px 2px 6px;
+  border-radius: 8px;
+}
+
+.weekday-weight:focus-within {
+  background: rgb(73 174 123 / 10%);
+}
+
+.weekday-weight-level {
+  align-self: center;
+  color: #82deb0;
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.weekday-weight-control {
+  position: relative;
+  display: flex;
+  width: 40px;
+  height: 164px;
+  align-items: center;
+  justify-content: center;
+}
+
+.weekday-weight-guides {
+  position: absolute;
+  inset: 7px 7px;
+  display: grid;
+  grid-template-rows: repeat(11, 1fr);
+  pointer-events: none;
+}
+
+.weekday-weight-guides i {
+  align-self: center;
+  display: block;
+  height: 1px;
+  background: #343b44;
+}
+
+.weekday-weight input {
+  position: relative;
+  z-index: 1;
+  width: 30px;
+  height: 158px;
+  margin: 0;
+  accent-color: #72e6ad;
+  cursor: pointer;
+  direction: rtl;
+  writing-mode: vertical-lr;
+}
+
+.weekday-weight input:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.weekday-weight label {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.weekday-weight output {
+  margin-top: 2px;
+  color: #b4bdc7;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.weekday-weight-status {
+  min-height: 16px;
+  margin: 8px 0 0;
+}
+
+.weekday-boundary-help {
+  margin: 9px 0 0;
 }
 
 .setting-row {

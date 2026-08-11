@@ -70,12 +70,10 @@ export interface PaceViewState {
   updatedAt: number | null;
 }
 
-export type PacePlanMode = "even" | "weekday";
 export type LargePlanVisualization = "deviation" | "weeklyAllocation";
 
 export interface PaceSettings {
-  planMode: PacePlanMode;
-  weekdayAllocations: number[];
+  weekdayWeights: number[];
   osNotificationsEnabled: boolean;
 }
 

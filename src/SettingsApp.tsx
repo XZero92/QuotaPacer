@@ -13,19 +13,29 @@ import {
   isPermissionGranted,
   requestPermission,
 } from "@tauri-apps/plugin-notification";
-import type {
-  EditableSettings,
-  PacePlanMode,
-  PaceSettings,
-  SettingsSession,
-} from "./types";
+import type { EditableSettings, PaceSettings, SettingsSession } from "./types";
 import { DEFAULT_OVERLAY_OPACITY, MIN_OVERLAY_OPACITY } from "./types";
 import "./SettingsApp.css";
 
 const DAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"];
+const FULL_DAY_LABELS = [
+  "월요일",
+  "화요일",
+  "수요일",
+  "목요일",
+  "금요일",
+  "토요일",
+  "일요일",
+];
+const DEFAULT_WEEKDAY_WEIGHTS = [5, 5, 5, 5, 5, 5, 5];
+const WEEKDAY_WEIGHT_PRESETS = {
+  even: DEFAULT_WEEKDAY_WEIGHTS,
+  weekday: [8, 8, 8, 8, 8, 5, 5],
+  weekend: [4, 4, 4, 4, 4, 10, 10],
+} as const;
+
 const DEFAULT_PACE_SETTINGS: PaceSettings = {
-  planMode: "even",
-  weekdayAllocations: [14.3, 14.3, 14.3, 14.3, 14.3, 14.3, 14.2],
+  weekdayWeights: DEFAULT_WEEKDAY_WEIGHTS,
   osNotificationsEnabled: false,
 };
 const DEFAULT_EDITABLE_SETTINGS: EditableSettings = {
@@ -38,25 +48,58 @@ type PermissionStatus = "checking" | "granted" | "denied";
 function settingsEqual(left: EditableSettings, right: EditableSettings) {
   return (
     left.overlayOpacity === right.overlayOpacity &&
-    left.paceSettings.planMode === right.paceSettings.planMode &&
     left.paceSettings.osNotificationsEnabled ===
       right.paceSettings.osNotificationsEnabled &&
-    left.paceSettings.weekdayAllocations.length ===
-      right.paceSettings.weekdayAllocations.length &&
-    left.paceSettings.weekdayAllocations.every((value, index) =>
-      Object.is(value, right.paceSettings.weekdayAllocations[index]),
+    left.paceSettings.weekdayWeights.length ===
+      right.paceSettings.weekdayWeights.length &&
+    left.paceSettings.weekdayWeights.every((value, index) =>
+      Object.is(value, right.paceSettings.weekdayWeights[index]),
     )
   );
 }
 
-function weekdayAllocationsValid(allocations: number[]) {
+function weekdayWeightsValid(weights: number[]) {
   return (
-    allocations.length === 7 &&
-    allocations.every(
-      (value) => Number.isFinite(value) && value >= 0 && value <= 100,
+    weights.length === 7 &&
+    weights.every(
+      (value) => Number.isInteger(value) && value >= 0 && value <= 10,
     ) &&
-    Math.abs(allocations.reduce((sum, value) => sum + value, 0) - 100) <= 0.1
+    weights.some((value) => value > 0)
   );
+}
+
+export function normalizeWeekdayWeights(weights: number[]) {
+  const effectiveWeights = weekdayWeightsValid(weights)
+    ? weights
+    : DEFAULT_WEEKDAY_WEIGHTS;
+  const total = effectiveWeights.reduce((sum, value) => sum + value, 0);
+  const rawTenths = effectiveWeights.map((value) => (value / total) * 1000);
+  const tenths = rawTenths.map(Math.floor);
+  const remaining = 1000 - tenths.reduce((sum, value) => sum + value, 0);
+  const order = rawTenths
+    .map((value, index) => ({
+      index,
+      remainder: value - Math.floor(value),
+    }))
+    .sort(
+      (left, right) =>
+        right.remainder - left.remainder || left.index - right.index,
+    );
+
+  for (let index = 0; index < remaining; index += 1) {
+    tenths[order[index].index] += 1;
+  }
+
+  return tenths.map((value) => value / 10);
+}
+
+function weekdayWeightLabel(weight: number) {
+  if (weight === 0) return "사용 안 함";
+  if (weight <= 2) return "매우 낮음";
+  if (weight <= 4) return "낮음";
+  if (weight === 5) return "보통";
+  if (weight <= 8) return "높음";
+  return "매우 높음";
 }
 
 function SettingsApp() {
@@ -73,6 +116,9 @@ function SettingsApp() {
   const [closeDialogOpen, setCloseDialogOpen] = useState(false);
   const [pendingClose, setPendingClose] = useState(false);
   const [opacityTooltipVisible, setOpacityTooltipVisible] = useState(false);
+  const [weightMessage, setWeightMessage] = useState(
+    "막대를 움직여 주간 사용 패턴을 만들어보세요.",
+  );
   const sessionIdRef = useRef<number | null>(null);
   const sessionLoadRunningRef = useRef(false);
   const sessionReloadRequestedRef = useRef(false);
@@ -85,14 +131,17 @@ function SettingsApp() {
 
   const paceSettings = draftSettings.paceSettings;
   const opacity = draftSettings.overlayOpacity;
-  const total = useMemo(
-    () =>
-      paceSettings.weekdayAllocations.reduce((sum, value) => sum + value, 0),
-    [paceSettings.weekdayAllocations],
+  const weekdayAllocations = useMemo(
+    () => normalizeWeekdayWeights(paceSettings.weekdayWeights),
+    [paceSettings.weekdayWeights],
   );
-  const allocationValid = weekdayAllocationsValid(
-    paceSettings.weekdayAllocations,
-  );
+  const weightsValid = weekdayWeightsValid(paceSettings.weekdayWeights);
+  const activeWeightPreset = Object.entries(WEEKDAY_WEIGHT_PRESETS).find(
+    ([, weights]) =>
+      weights.every(
+        (weight, index) => weight === paceSettings.weekdayWeights[index],
+      ),
+  )?.[0];
   const dirty = !settingsEqual(persistedSettings, draftSettings);
   const formBusy = saving || requestingPermission;
   const opacityTooltipPosition =
@@ -137,13 +186,31 @@ function SettingsApp() {
     (session: SettingsSession) => {
       cancelScheduledPreview();
       hideOpacityTooltip();
+      const recovered = !weekdayWeightsValid(
+        session.settings.paceSettings.weekdayWeights,
+      );
+      const recoveredSettings = recovered
+        ? {
+            ...session.settings,
+            paceSettings: {
+              ...session.settings.paceSettings,
+              weekdayWeights: [...DEFAULT_WEEKDAY_WEIGHTS],
+            },
+          }
+        : session.settings;
       sessionIdRef.current = session.sessionId;
       previewRevisionRef.current = 0;
       pendingOpacityRef.current = session.settings.overlayOpacity;
       setSessionId(session.sessionId);
       setPersistedSettings(session.settings);
-      setDraftSettings(session.settings);
+      setDraftSettings(recoveredSettings);
       setCloseDialogOpen(false);
+      setWeightMessage(
+        recovered
+          ? "잘못된 요일별 강도 초안을 균등 배분으로 복구했습니다."
+          : "막대를 움직여 주간 사용 패턴을 만들어보세요.",
+      );
+      return recovered;
     },
     [cancelScheduledPreview, hideOpacityTooltip],
   );
@@ -159,8 +226,12 @@ function SettingsApp() {
       cancelScheduledPreview();
       try {
         const session = await invoke<SettingsSession>("begin_settings_session");
-        applySession(session);
-        setMessage("");
+        const recovered = applySession(session);
+        setMessage(
+          recovered
+            ? "잘못된 요일별 강도 초안을 균등 배분으로 복구했습니다."
+            : "",
+        );
       } catch (error) {
         setMessage(String(error));
       }
@@ -175,28 +246,25 @@ function SettingsApp() {
       .catch(() => setPermission("denied"));
   }, []);
 
-  const scheduleOpacityPreview = useCallback(
-    (overlayOpacity: number) => {
-      pendingOpacityRef.current = overlayOpacity;
-      if (previewFrameRef.current !== null) return;
-      previewFrameRef.current = window.requestAnimationFrame(() => {
-        previewFrameRef.current = null;
-        const activeSessionId = sessionIdRef.current;
-        if (activeSessionId === null) return;
-        const revision = ++previewRevisionRef.current;
-        void invoke("preview_overlay_opacity", {
-          sessionId: activeSessionId,
-          revision,
-          overlayOpacity: pendingOpacityRef.current,
-        }).catch((error) => {
-          if (sessionIdRef.current === activeSessionId) {
-            setMessage(String(error));
-          }
-        });
+  const scheduleOpacityPreview = useCallback((overlayOpacity: number) => {
+    pendingOpacityRef.current = overlayOpacity;
+    if (previewFrameRef.current !== null) return;
+    previewFrameRef.current = window.requestAnimationFrame(() => {
+      previewFrameRef.current = null;
+      const activeSessionId = sessionIdRef.current;
+      if (activeSessionId === null) return;
+      const revision = ++previewRevisionRef.current;
+      void invoke("preview_overlay_opacity", {
+        sessionId: activeSessionId,
+        revision,
+        overlayOpacity: pendingOpacityRef.current,
+      }).catch((error) => {
+        if (sessionIdRef.current === activeSessionId) {
+          setMessage(String(error));
+        }
       });
-    },
-    [],
-  );
+    });
+  }, []);
 
   const cancelSessionAndHide = useCallback(async () => {
     cancelScheduledPreview();
@@ -289,42 +357,41 @@ function SettingsApp() {
     return () => window.clearTimeout(deferredClose);
   }, [formBusy, pendingClose, requestClose]);
 
-  const setPlanMode = (planMode: PacePlanMode) => {
-    const shouldRestoreAllocations = planMode === "even" && !allocationValid;
-    const persistedAllocations =
-      persistedSettings.paceSettings.weekdayAllocations;
-    const restoredAllocations = weekdayAllocationsValid(persistedAllocations)
-      ? persistedAllocations
-      : DEFAULT_PACE_SETTINGS.weekdayAllocations;
-
+  const setWeekdayWeight = (index: number, weight: number) => {
+    const nextWeights = paceSettings.weekdayWeights.map(
+      (currentWeight, item) => (item === index ? weight : currentWeight),
+    );
+    if (nextWeights.every((currentWeight) => currentWeight === 0)) {
+      setWeightMessage("최소 한 요일의 사용 강도는 1 이상이어야 합니다.");
+      setMessage("");
+      return;
+    }
     setDraftSettings((current) => ({
       ...current,
       paceSettings: {
         ...current.paceSettings,
-        planMode,
-        weekdayAllocations: shouldRestoreAllocations
-          ? [...restoredAllocations]
-          : current.paceSettings.weekdayAllocations,
+        weekdayWeights: nextWeights,
       },
     }));
-    setMessage(
-      shouldRestoreAllocations
-        ? "잘못된 요일별 배분 초안을 유효한 값으로 되돌렸습니다."
-        : "",
+    setWeightMessage(
+      `${FULL_DAY_LABELS[index]} 강도를 ${weight}단계 · ${weekdayWeightLabel(weight)}으로 변경했습니다.`,
     );
+    setMessage("");
   };
 
-  const setAllocation = (index: number, value: string) => {
-    const parsed = Number(value);
+  const applyWeightPreset = (
+    preset: keyof typeof WEEKDAY_WEIGHT_PRESETS,
+    label: string,
+  ) => {
+    const weights = WEEKDAY_WEIGHT_PRESETS[preset];
     setDraftSettings((current) => ({
       ...current,
       paceSettings: {
         ...current.paceSettings,
-        weekdayAllocations: current.paceSettings.weekdayAllocations.map(
-          (allocation, item) => (item === index ? parsed : allocation),
-        ),
+        weekdayWeights: [...weights],
       },
     }));
+    setWeightMessage(`${label} 강도 패턴을 적용했습니다.`);
     setMessage("");
   };
 
@@ -381,7 +448,7 @@ function SettingsApp() {
     const activeSessionId = sessionIdRef.current;
     if (
       activeSessionId === null ||
-      !allocationValid ||
+      !weightsValid ||
       saving ||
       requestingPermission
     ) {
@@ -444,67 +511,112 @@ function SettingsApp() {
 
       <div className="settings-content">
         <section>
-          <h2>주간 사용 계획</h2>
-          <p className="section-help">
-            정확히 7일인 제한 창의 현재 권장선을 정합니다.
-          </p>
-          <div className="segmented" role="radiogroup" aria-label="계획 모드">
-            <button
-              type="button"
-              role="radio"
-              aria-checked={paceSettings.planMode === "even"}
-              className={paceSettings.planMode === "even" ? "selected" : ""}
-              disabled={formBusy}
-              onClick={() => setPlanMode("even")}
-            >
-              균등 배분
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={paceSettings.planMode === "weekday"}
-              className={paceSettings.planMode === "weekday" ? "selected" : ""}
-              disabled={formBusy}
-              onClick={() => setPlanMode("weekday")}
-            >
-              요일별 배분
-            </button>
-          </div>
-          {paceSettings.planMode === "even" ? (
-            <p className="even-plan-summary">월~일 동일 배분 · 하루 약 14.3%</p>
-          ) : (
-            <>
-              <div className="weekday-grid">
-                {DAY_LABELS.map((label, index) => (
-                  <label key={label}>
-                    <span>{label}</span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="0.1"
-                      aria-label={`${label}요일 배분율`}
-                      disabled={formBusy}
-                      value={paceSettings.weekdayAllocations[index]}
-                      onChange={(event) =>
-                        setAllocation(index, event.target.value)
-                      }
-                    />
-                    <small>%</small>
-                  </label>
-                ))}
-              </div>
-              <p
-                className={`allocation-total ${
-                  allocationValid ? "" : "is-error"
-                }`}
-                role="status"
-              >
-                합계 {Number.isFinite(total) ? total.toFixed(1) : "—"}%
-                {!allocationValid && " · 100±0.1%로 맞춰주세요"}
+          <div className="weekly-plan-heading">
+            <div>
+              <h2>주간 사용 계획</h2>
+              <p className="section-help">
+                요일별 상대 강도를 정하면 실제 배분을 100%로 계산합니다.
               </p>
-            </>
-          )}
+            </div>
+            <strong>합계 100.0%</strong>
+          </div>
+
+          <div
+            className="weekday-distribution"
+            role="img"
+            aria-label={`요일별 계산 배분, ${FULL_DAY_LABELS.map(
+              (label, index) =>
+                `${label} ${weekdayAllocations[index].toFixed(1)}%`,
+            ).join(", ")}`}
+          >
+            {weekdayAllocations.map((allocation, index) => (
+              <span
+                key={FULL_DAY_LABELS[index]}
+                style={{ width: `${allocation}%` }}
+              />
+            ))}
+          </div>
+
+          <div
+            className="weekday-presets"
+            role="group"
+            aria-label="빠른 강도 선택"
+          >
+            {(
+              [
+                ["even", "균등 배분"],
+                ["weekday", "평일 중심"],
+                ["weekend", "주말 중심"],
+              ] as const
+            ).map(([preset, label]) => (
+              <button
+                key={preset}
+                type="button"
+                aria-pressed={activeWeightPreset === preset}
+                disabled={formBusy}
+                onClick={() => applyWeightPreset(preset, label)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="weekday-editor">
+            <div className="weekday-editor-heading">
+              <h3>요일별 사용 강도</h3>
+              <span>막대는 자동으로 움직이지 않습니다</span>
+            </div>
+            <div
+              className="weekday-equalizer"
+              aria-label="요일별 상대 사용 강도"
+            >
+              {DAY_LABELS.map((label, index) => {
+                const inputId = `weekday-weight-${index}`;
+                const weight = paceSettings.weekdayWeights[index];
+                const allocation = weekdayAllocations[index];
+                return (
+                  <div className="weekday-weight" key={label}>
+                    <span className="weekday-weight-level">
+                      {weekdayWeightLabel(weight)}
+                    </span>
+                    <div className="weekday-weight-control">
+                      <span
+                        className="weekday-weight-guides"
+                        aria-hidden="true"
+                      >
+                        {Array.from({ length: 11 }, (_, guideIndex) => (
+                          <i key={guideIndex} />
+                        ))}
+                      </span>
+                      <input
+                        id={inputId}
+                        type="range"
+                        min="0"
+                        max="10"
+                        step="1"
+                        aria-label={`${FULL_DAY_LABELS[index]} 상대 사용 강도`}
+                        aria-valuetext={`${weekdayWeightLabel(weight)}, 실제 배분 ${allocation.toFixed(1)}%`}
+                        disabled={formBusy}
+                        value={weight}
+                        onChange={(event) =>
+                          setWeekdayWeight(index, Number(event.target.value))
+                        }
+                      />
+                    </div>
+                    <label htmlFor={inputId}>{label}</label>
+                    <output htmlFor={inputId}>{allocation.toFixed(1)}%</output>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="weekday-weight-status" role="status">
+              {weightMessage}
+            </p>
+          </div>
+
+          <p className="weekday-boundary-help">
+            각 요일은 주간 제한 창의 초기화 시각부터 시작되는 24시간 구간입니다.
+          </p>
         </section>
 
         <section>
@@ -597,8 +709,8 @@ function SettingsApp() {
             <div>
               <h2>최근 이력</h2>
               <p className="section-help">
-                최근 사용률 이력과 알림 중복 방지 상태를 최대 25시간
-                보존합니다. 계정 정보는 저장하지 않습니다.
+                최근 사용률 이력과 알림 중복 방지 상태를 최대 25시간 보존합니다.
+                계정 정보는 저장하지 않습니다.
               </p>
             </div>
             <button
@@ -618,9 +730,7 @@ function SettingsApp() {
         <button
           className="primary-button"
           type="button"
-          disabled={
-            formBusy || !allocationValid || !dirty || sessionId === null
-          }
+          disabled={formBusy || !weightsValid || !dirty || sessionId === null}
           onClick={() => void save()}
         >
           저장
@@ -644,7 +754,7 @@ function SettingsApp() {
               <button
                 className="primary-button"
                 type="button"
-                disabled={formBusy || !allocationValid}
+                disabled={formBusy || !weightsValid}
                 onClick={() => void save(true)}
               >
                 저장
