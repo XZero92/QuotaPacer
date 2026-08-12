@@ -1,4 +1,6 @@
 import type { UsageViewState, UsageWindow } from "./types";
+import type { Language } from "./types";
+import { locale, text } from "./i18n";
 
 export const INITIAL_USAGE_STATE: UsageViewState = {
   connection: "starting",
@@ -31,19 +33,28 @@ export function featuredWindow(state: UsageViewState) {
   return declared ?? sortedWindows(state.windows)[0] ?? null;
 }
 
-export function formatWindowDuration(minutes: number | null) {
-  if (minutes === null) return "사용량 한도";
-  if (minutes === 300) return "5시간";
-  if (minutes === 10_080) return "주간";
-  if (minutes < 60) return `${minutes}분`;
-  if (minutes % 1_440 === 0) return `${minutes / 1_440}일`;
-  if (minutes % 60 === 0) return `${minutes / 60}시간`;
-  return `${minutes}분`;
+export function formatWindowDuration(
+  minutes: number | null,
+  language: Language = "ko",
+) {
+  if (minutes === null) return text(language, "사용량 한도", "Usage limit");
+  if (minutes === 300) return text(language, "5시간", "5 hours");
+  if (minutes === 10_080) return text(language, "주간", "Weekly");
+  if (minutes < 60) return text(language, `${minutes}분`, `${minutes} min`);
+  if (minutes % 1_440 === 0)
+    return text(language, `${minutes / 1_440}일`, `${minutes / 1_440} days`);
+  if (minutes % 60 === 0)
+    return text(language, `${minutes / 60}시간`, `${minutes / 60} hours`);
+  return text(language, `${minutes}분`, `${minutes} min`);
 }
 
-export function formatResetTime(timestamp: number | null) {
-  if (timestamp === null) return "리셋 시각 미정";
-  return new Intl.DateTimeFormat(undefined, {
+export function formatResetTime(
+  timestamp: number | null,
+  language: Language = "ko",
+) {
+  if (timestamp === null)
+    return text(language, "리셋 시각 미정", "Reset time unknown");
+  return new Intl.DateTimeFormat(locale(language), {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -60,16 +71,23 @@ export function usageTone(remainingPercent: number) {
 export function staleAgeLabel(
   lastSuccessfulAt: number | null,
   now = Date.now(),
+  language: Language = "ko",
 ) {
   if (lastSuccessfulAt === null) return null;
   const minutes = Math.max(
     0,
     Math.floor((now - lastSuccessfulAt * 1_000) / 60_000),
   );
-  return `${minutes}분 전`;
+  return text(language, `${minutes}분 전`, `${minutes} min ago`);
 }
 
-export function staleLabel(lastSuccessfulAt: number | null, now = Date.now()) {
-  const age = staleAgeLabel(lastSuccessfulAt, now);
-  return age === null ? "업데이트 지연" : `업데이트 지연 · ${age}`;
+export function staleLabel(
+  lastSuccessfulAt: number | null,
+  now = Date.now(),
+  language: Language = "ko",
+) {
+  const age = staleAgeLabel(lastSuccessfulAt, now, language);
+  return age === null
+    ? text(language, "업데이트 지연", "Update delayed")
+    : text(language, `업데이트 지연 · ${age}`, `Update delayed · ${age}`);
 }

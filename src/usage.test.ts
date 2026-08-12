@@ -71,6 +71,8 @@ describe("사용량 표시 규칙", () => {
     expect(formatWindowDuration(90)).toBe("90분");
     expect(formatWindowDuration(2_880)).toBe("2일");
     expect(formatWindowDuration(null)).toBe("사용량 한도");
+    expect(formatWindowDuration(10_080, "en")).toBe("Weekly");
+    expect(formatWindowDuration(90, "en")).toBe("90 min");
   });
 
   it("색상 임계치를 경계값까지 적용한다", () => {

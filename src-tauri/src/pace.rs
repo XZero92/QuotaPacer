@@ -1,4 +1,4 @@
-use crate::settings::{PaceSettings, SettingsStore};
+use crate::settings::{Language, PaceSettings, SettingsStore};
 use crate::usage::{ConnectionState, UsageViewState, UsageWindow};
 use chrono::{Datelike, Local, TimeZone};
 use serde::{Deserialize, Serialize};
@@ -181,11 +181,12 @@ impl PaceService {
             history_changed |= coalesce_alert_records(&mut runtime.history);
             history_changed |= record_samples(&mut runtime.history, usage, as_of);
             let view = calculate_state(usage, &settings, &runtime.history.samples);
-            let notifications = advance_alerts(
+            let notifications = advance_alerts_with_language(
                 &mut runtime,
                 usage,
                 &view,
                 settings.os_notifications_enabled,
+                self.settings.language(),
             );
             runtime.view = view.clone();
             if history_changed || !notifications.is_empty() {
@@ -648,11 +649,12 @@ fn local_weekday_index(timestamp: i64) -> usize {
         .unwrap_or(0)
 }
 
-fn advance_alerts(
+fn advance_alerts_with_language(
     runtime: &mut PaceRuntime,
     usage: &UsageViewState,
     view: &PaceViewState,
     notifications_enabled: bool,
+    language: Language,
 ) -> Vec<NotificationRequest> {
     if usage.connection == ConnectionState::Stale {
         return Vec::new();
@@ -724,26 +726,41 @@ fn advance_alerts(
             continue;
         }
 
-        let label = window_duration_label(window.window_duration_mins);
+        let label = window_duration_label(window.window_duration_mins, language);
         let title = if notify_plan && notify_exhaustion {
-            format!("QuotaPacer · {label} 계획·소진 경고")
+            match language {
+                Language::Ko => format!("QuotaPacer · {label} 계획·소진 경고"),
+                Language::En => format!("QuotaPacer · {label} plan and exhaustion alert"),
+            }
         } else if notify_exhaustion {
-            format!("QuotaPacer · {label} 초기화 전 소진 예상")
+            match language {
+                Language::Ko => format!("QuotaPacer · {label} 초기화 전 소진 예상"),
+                Language::En => format!("QuotaPacer · {label} limit may run out before reset"),
+            }
         } else {
-            format!("QuotaPacer · {label} 사용 계획 초과")
+            match language {
+                Language::Ko => format!("QuotaPacer · {label} 사용 계획 초과"),
+                Language::En => format!("QuotaPacer · {label} usage is ahead of plan"),
+            }
         };
         let mut parts = Vec::new();
         if notify_plan {
             if let Some(delta) = pace.plan_delta_percent_points {
-                parts.push(format!("현재 계획보다 {:.0}%p 초과", delta.max(0.0)));
+                parts.push(match language {
+                    Language::Ko => format!("현재 계획보다 {:.0}%p 초과", delta.max(0.0)),
+                    Language::En => format!("{:.0} pp ahead of the current plan", delta.max(0.0)),
+                });
             }
             alert.plan_notified = true;
         }
         if notify_exhaustion {
             if let Some(exhaustion_at) = pace.projected_exhaustion_at {
                 let lead_minutes = ((resets_at - exhaustion_at).max(0) + 59) / 60;
-                let lead = format_lead_duration(lead_minutes);
-                parts.push(format!("초기화보다 약 {lead} 먼저 소진 예상"));
+                let lead = format_lead_duration(lead_minutes, language);
+                parts.push(match language {
+                    Language::Ko => format!("초기화보다 약 {lead} 먼저 소진 예상"),
+                    Language::En => format!("Expected to run out about {lead} before reset"),
+                });
             }
             alert.exhaustion_notified = true;
         }
@@ -753,6 +770,16 @@ fn advance_alerts(
         });
     }
     notifications
+}
+
+#[cfg(test)]
+fn advance_alerts(
+    runtime: &mut PaceRuntime,
+    usage: &UsageViewState,
+    view: &PaceViewState,
+    notifications_enabled: bool,
+) -> Vec<NotificationRequest> {
+    advance_alerts_with_language(runtime, usage, view, notifications_enabled, Language::Ko)
 }
 
 fn confirm_alert_candidate(
@@ -776,7 +803,7 @@ fn confirm_alert_candidate(
     }
 }
 
-fn format_lead_duration(total_minutes: i64) -> String {
+fn format_lead_duration(total_minutes: i64, language: Language) -> String {
     let total_minutes = total_minutes.max(0);
     let days = total_minutes / (24 * 60);
     let hours = (total_minutes % (24 * 60)) / 60;
@@ -784,36 +811,69 @@ fn format_lead_duration(total_minutes: i64) -> String {
 
     if days > 0 {
         if hours > 0 {
-            return format!("{days}일 {hours}시간");
+            return match language {
+                Language::Ko => format!("{days}일 {hours}시간"),
+                Language::En => format!("{days}d {hours}h"),
+            };
         }
         if minutes > 0 {
-            return format!("{days}일 {minutes}분");
+            return match language {
+                Language::Ko => format!("{days}일 {minutes}분"),
+                Language::En => format!("{days}d {minutes}m"),
+            };
         }
-        return format!("{days}일");
+        return match language {
+            Language::Ko => format!("{days}일"),
+            Language::En => format!("{days}d"),
+        };
     }
     if hours > 0 {
         if minutes > 0 {
-            return format!("{hours}시간 {minutes}분");
+            return match language {
+                Language::Ko => format!("{hours}시간 {minutes}분"),
+                Language::En => format!("{hours}h {minutes}m"),
+            };
         }
-        return format!("{hours}시간");
+        return match language {
+            Language::Ko => format!("{hours}시간"),
+            Language::En => format!("{hours}h"),
+        };
     }
-    format!("{minutes}분")
+    match language {
+        Language::Ko => format!("{minutes}분"),
+        Language::En => format!("{minutes}m"),
+    }
 }
 
-fn window_duration_label(duration_minutes: Option<i64>) -> String {
+fn window_duration_label(duration_minutes: Option<i64>, language: Language) -> String {
     let Some(minutes) = duration_minutes else {
-        return "사용량".to_string();
+        return match language {
+            Language::Ko => "사용량".to_string(),
+            Language::En => "usage".to_string(),
+        };
     };
     if minutes == WEEK_MINUTES {
-        return "주간".to_string();
+        return match language {
+            Language::Ko => "주간".to_string(),
+            Language::En => "weekly".to_string(),
+        };
     }
     if minutes % (24 * 60) == 0 {
-        return format!("{}일", minutes / (24 * 60));
+        return match language {
+            Language::Ko => format!("{}일", minutes / (24 * 60)),
+            Language::En => format!("{}d", minutes / (24 * 60)),
+        };
     }
     if minutes % 60 == 0 {
-        return format!("{}시간", minutes / 60);
+        return match language {
+            Language::Ko => format!("{}시간", minutes / 60),
+            Language::En => format!("{}h", minutes / 60),
+        };
     }
-    format!("{minutes}분")
+    match language {
+        Language::Ko => format!("{minutes}분"),
+        Language::En => format!("{minutes}m"),
+    }
 }
 
 #[cfg(test)]
@@ -1384,13 +1444,42 @@ mod tests {
 
     #[test]
     fn notification_lead_duration_uses_readable_units() {
-        assert_eq!(format_lead_duration(0), "0분");
-        assert_eq!(format_lead_duration(59), "59분");
-        assert_eq!(format_lead_duration(60), "1시간");
-        assert_eq!(format_lead_duration(90), "1시간 30분");
-        assert_eq!(format_lead_duration(24 * 60), "1일");
-        assert_eq!(format_lead_duration(25 * 60), "1일 1시간");
-        assert_eq!(format_lead_duration(25 * 60 + 30), "1일 1시간");
+        assert_eq!(format_lead_duration(0, Language::Ko), "0분");
+        assert_eq!(format_lead_duration(59, Language::Ko), "59분");
+        assert_eq!(format_lead_duration(60, Language::Ko), "1시간");
+        assert_eq!(format_lead_duration(90, Language::Ko), "1시간 30분");
+        assert_eq!(format_lead_duration(24 * 60, Language::Ko), "1일");
+        assert_eq!(format_lead_duration(25 * 60, Language::Ko), "1일 1시간");
+        assert_eq!(
+            format_lead_duration(25 * 60 + 30, Language::Ko),
+            "1일 1시간"
+        );
+        assert_eq!(format_lead_duration(90, Language::En), "1h 30m");
+    }
+
+    #[test]
+    fn notifications_use_the_selected_english_language() {
+        let resets_at = 7 * DAY_SECONDS;
+        let as_of = 3 * DAY_SECONDS;
+        let usage = usage(weekly_window(60, resets_at), as_of);
+        let mut view = calculate_state(&usage, &PaceSettings::default(), &[]);
+        view.windows[0].status = PaceStatus::PlanExceeded;
+        view.windows[0].early_estimate = false;
+        view.windows[0].projected_exhaustion_at = None;
+        let mut runtime = PaceRuntime::default();
+
+        assert!(
+            advance_alerts_with_language(&mut runtime, &usage, &view, true, Language::En,)
+                .is_empty()
+        );
+        let mut confirmed = usage.clone();
+        confirmed.fetched_at = Some(as_of + ALERT_CONFIRMATION_INTERVAL_SECONDS);
+        let notifications =
+            advance_alerts_with_language(&mut runtime, &confirmed, &view, true, Language::En);
+
+        assert_eq!(notifications.len(), 1);
+        assert!(notifications[0].title.contains("usage is ahead of plan"));
+        assert!(notifications[0].body.contains("ahead of the current plan"));
     }
 
     #[test]

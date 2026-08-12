@@ -7,6 +7,14 @@ pub const DEFAULT_OVERLAY_OPACITY: u8 = 100;
 pub const MIN_OVERLAY_OPACITY: u8 = 40;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Language {
+    #[default]
+    Ko,
+    En,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LargePlanVisualization {
     #[default]
@@ -37,6 +45,7 @@ pub struct PaceSettings {
 pub struct EditableSettings {
     pub pace_settings: PaceSettings,
     pub overlay_opacity: u8,
+    pub language: Language,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -100,6 +109,8 @@ pub struct AppSettings {
     pub large_plan_visualization: LargePlanVisualization,
     #[serde(default)]
     pub pace: PaceSettings,
+    #[serde(default)]
+    pub language: Language,
 }
 
 impl Default for AppSettings {
@@ -111,6 +122,7 @@ impl Default for AppSettings {
             overlay_opacity: DEFAULT_OVERLAY_OPACITY,
             large_plan_visualization: LargePlanVisualization::default(),
             pace: PaceSettings::default(),
+            language: Language::default(),
         }
     }
 }
@@ -194,10 +206,12 @@ impl SettingsStore {
             .map(|value| EditableSettings {
                 pace_settings: value.pace.clone(),
                 overlay_opacity: value.overlay_opacity,
+                language: value.language,
             })
             .unwrap_or_else(|_| EditableSettings {
                 pace_settings: PaceSettings::default(),
                 overlay_opacity: DEFAULT_OVERLAY_OPACITY,
+                language: Language::default(),
             })
     }
 
@@ -244,6 +258,7 @@ impl SettingsStore {
         let mut next = value.clone();
         next.pace = settings.pace_settings.clone();
         next.overlay_opacity = settings.overlay_opacity;
+        next.language = settings.language;
         self.save_locked(&next)?;
         *value = next;
         Ok(settings)
@@ -253,6 +268,13 @@ impl SettingsStore {
         self.value
             .lock()
             .map(|value| value.pace.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn language(&self) -> Language {
+        self.value
+            .lock()
+            .map(|value| value.language)
             .unwrap_or_default()
     }
 
@@ -290,8 +312,8 @@ pub fn validate_overlay_opacity(opacity: u8) -> Result<(), String> {
 mod tests {
     use super::{
         normalize_overlay_opacity, validate_overlay_opacity, AppSettings, EditableSettings,
-        LargePlanVisualization, OverlaySize, PaceSettings, SettingsStore, DEFAULT_OVERLAY_OPACITY,
-        MIN_OVERLAY_OPACITY,
+        Language, LargePlanVisualization, OverlaySize, PaceSettings, SettingsStore,
+        DEFAULT_OVERLAY_OPACITY, MIN_OVERLAY_OPACITY,
     };
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
@@ -311,6 +333,7 @@ mod tests {
             LargePlanVisualization::Deviation
         );
         assert!(!settings.pace.os_notifications_enabled);
+        assert_eq!(settings.language, Language::Ko);
         let serialized = serde_json::to_string(&settings).unwrap();
         assert!(serialized.contains(r#""weekdayWeights":[5,5,5,5,5,5,5]"#));
         assert!(!serialized.contains("planMode"));
@@ -432,6 +455,7 @@ mod tests {
                 ..PaceSettings::default()
             },
             overlay_opacity: 65,
+            language: Language::En,
         };
 
         store.set_editable_settings(editable.clone()).unwrap();
@@ -442,6 +466,7 @@ mod tests {
         assert_eq!(saved.codex_executable.as_deref(), Some("custom-codex"));
         assert_eq!(saved.window_position.unwrap().x, 42);
         assert_eq!(saved.overlay_size, OverlaySize::Large);
+        assert_eq!(saved.language, Language::En);
         assert_eq!(
             saved.large_plan_visualization,
             LargePlanVisualization::WeeklyAllocation
@@ -462,6 +487,7 @@ mod tests {
                 ..PaceSettings::default()
             },
             overlay_opacity: 65,
+            language: Language::En,
         };
 
         assert!(store.set_editable_settings(changed).is_err());
@@ -470,6 +496,7 @@ mod tests {
             EditableSettings {
                 pace_settings: PaceSettings::default(),
                 overlay_opacity: DEFAULT_OVERLAY_OPACITY,
+                language: Language::Ko,
             }
         );
     }

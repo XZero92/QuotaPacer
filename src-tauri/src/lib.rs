@@ -7,14 +7,14 @@ use codex::{inspect_cli, CliInfo, UsageService};
 use pace::{PaceService, PaceViewState};
 use serde::{Deserialize, Serialize};
 use settings::{
-    validate_overlay_opacity, EditableSettings, LargePlanVisualization, OverlayAppearanceSettings,
-    OverlaySize, SettingsStore, StoredPosition,
+    validate_overlay_opacity, EditableSettings, Language, LargePlanVisualization,
+    OverlayAppearanceSettings, OverlaySize, SettingsStore, StoredPosition,
 };
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::menu::{
-    CheckMenuItem, CheckMenuItemBuilder, Menu, MenuBuilder, MenuItemBuilder, Submenu,
+    CheckMenuItem, CheckMenuItemBuilder, Menu, MenuBuilder, MenuItem, MenuItemBuilder, Submenu,
     SubmenuBuilder,
 };
 use tauri::tray::TrayIconBuilder;
@@ -75,6 +75,7 @@ struct SettingsSession {
 struct ActiveAppearancePreview {
     session_id: u64,
     latest_revision: u64,
+    latest_language_revision: u64,
     appearance: OverlayAppearance,
     has_preview: bool,
 }
@@ -102,6 +103,7 @@ impl OverlayAppearancePreviewController {
         self.active = Some(ActiveAppearancePreview {
             session_id,
             latest_revision: 0,
+            latest_language_revision: 0,
             appearance: persisted_appearance,
             has_preview: false,
         });
@@ -125,6 +127,16 @@ impl OverlayAppearancePreviewController {
             active.appearance
         };
         Some(self.next_update(appearance, OverlayAppearancePhase::Preview))
+    }
+
+    fn preview_language(&mut self, session_id: u64, revision: u64) -> bool {
+        let Some(active) = self.active.as_mut().filter(|active| {
+            active.session_id == session_id && revision > active.latest_language_revision
+        }) else {
+            return false;
+        };
+        active.latest_language_revision = revision;
+        true
     }
 
     fn commit_visualization(
@@ -180,6 +192,7 @@ impl OverlayAppearancePreviewController {
         self.active = Some(ActiveAppearancePreview {
             session_id: next_session_id,
             latest_revision: 0,
+            latest_language_revision: 0,
             appearance,
             has_preview: false,
         });
@@ -223,6 +236,7 @@ impl OverlayAppearancePreviewController {
 
 #[derive(Clone)]
 struct SizeMenuItems {
+    submenu: Submenu<Wry>,
     small: CheckMenuItem<Wry>,
     middle: CheckMenuItem<Wry>,
     large: CheckMenuItem<Wry>,
@@ -235,12 +249,30 @@ impl SizeMenuItems {
         self.large.set_checked(selected == OverlaySize::Large)?;
         Ok(())
     }
+
+    fn sync_language(&self, language: Language) -> tauri::Result<()> {
+        self.submenu
+            .set_text(menu_text(language, "오버레이 크기", "Overlay size"))?;
+        self.small.set_text(menu_text(language, "작게", "Small"))?;
+        self.middle
+            .set_text(menu_text(language, "보통", "Medium"))?;
+        self.large.set_text(menu_text(language, "크게", "Large"))?;
+        Ok(())
+    }
 }
 
 struct OverlayMenus {
     context: Menu<Wry>,
     tray_sizes: SizeMenuItems,
     context_sizes: SizeMenuItems,
+    tray_toggle: MenuItem<Wry>,
+    tray_refresh: MenuItem<Wry>,
+    tray_settings: MenuItem<Wry>,
+    tray_quit: MenuItem<Wry>,
+    context_refresh: MenuItem<Wry>,
+    context_settings: MenuItem<Wry>,
+    context_hide: MenuItem<Wry>,
+    context_quit: MenuItem<Wry>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
@@ -267,6 +299,35 @@ impl OverlayMenus {
         self.tray_sizes.sync(selected)?;
         self.context_sizes.sync(selected)
     }
+
+    fn sync_language(&self, language: Language) -> tauri::Result<()> {
+        self.tray_sizes.sync_language(language)?;
+        self.context_sizes.sync_language(language)?;
+        self.tray_toggle
+            .set_text(menu_text(language, "표시/숨기기", "Show/Hide"))?;
+        self.tray_refresh
+            .set_text(menu_text(language, "새로고침", "Refresh"))?;
+        self.tray_settings
+            .set_text(menu_text(language, "설정", "Settings"))?;
+        self.tray_quit
+            .set_text(menu_text(language, "종료", "Quit"))?;
+        self.context_refresh
+            .set_text(menu_text(language, "새로고침", "Refresh"))?;
+        self.context_settings
+            .set_text(menu_text(language, "설정…", "Settings…"))?;
+        self.context_hide
+            .set_text(menu_text(language, "오버레이 숨기기", "Hide overlay"))?;
+        self.context_quit
+            .set_text(menu_text(language, "QuotaPacer 종료", "Quit QuotaPacer"))?;
+        Ok(())
+    }
+}
+
+fn menu_text(language: Language, korean: &'static str, english: &'static str) -> &'static str {
+    match language {
+        Language::Ko => korean,
+        Language::En => english,
+    }
 }
 
 #[tauri::command]
@@ -277,6 +338,11 @@ fn get_usage_state(state: State<'_, AppState>) -> UsageViewState {
 #[tauri::command]
 fn get_pace_state(state: State<'_, AppState>) -> PaceViewState {
     state.pace.state()
+}
+
+#[tauri::command]
+fn get_language(state: State<'_, AppState>) -> Language {
+    state.settings.language()
 }
 
 #[tauri::command]
@@ -338,6 +404,7 @@ fn begin_settings_session(
     if let Some(update) = reverted {
         emit_appearance_update(&app, update);
     }
+    emit_language_update(&app, settings.language);
     Ok(SettingsSession {
         session_id,
         settings,
@@ -362,6 +429,25 @@ fn preview_overlay_opacity(
         emit_appearance_update(&app, update);
     }
     Ok(update)
+}
+
+#[tauri::command]
+fn preview_language(
+    session_id: u64,
+    revision: u64,
+    language: Language,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    let accepted = state
+        .appearance_preview
+        .lock()
+        .map_err(|_| "오버레이 미리보기 상태를 잠글 수 없습니다.".to_string())?
+        .preview_language(session_id, revision);
+    if accepted {
+        emit_language_update(&app, language);
+    }
+    Ok(accepted)
 }
 
 #[tauri::command]
@@ -391,6 +477,7 @@ fn save_editable_settings(
     settings: EditableSettings,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
+    menus: State<'_, OverlayMenus>,
 ) -> Result<SettingsSession, String> {
     let mut preview = state
         .appearance_preview
@@ -400,6 +487,7 @@ fn save_editable_settings(
         return Err("설정 세션이 만료되었습니다. 설정 창을 다시 열어주세요.".to_string());
     }
     let previous_pace_settings = state.settings.pace_settings();
+    let previous_language = state.settings.language();
     let saved = state.settings.set_editable_settings(settings)?;
     let saved_appearance = OverlayAppearance::from(state.settings.overlay_appearance());
     let (next_session_id, update) = preview
@@ -412,6 +500,12 @@ fn save_editable_settings(
         &state.usage.state(),
     );
     emit_appearance_update(&app, update);
+    if previous_language != saved.language {
+        menus
+            .sync_language(saved.language)
+            .map_err(|error| error.to_string())?;
+    }
+    emit_language_update(&app, saved.language);
     Ok(SettingsSession {
         session_id: next_session_id,
         settings: saved,
@@ -425,14 +519,20 @@ fn cancel_settings_session(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let persisted_appearance = OverlayAppearance::from(state.settings.overlay_appearance());
-    let update = state
+    let persisted_language = state.settings.language();
+    let mut preview = state
         .appearance_preview
         .lock()
-        .map_err(|_| "오버레이 미리보기 상태를 잠글 수 없습니다.".to_string())?
-        .cancel(session_id, persisted_appearance);
+        .map_err(|_| "오버레이 미리보기 상태를 잠글 수 없습니다.".to_string())?;
+    if !preview.is_active(session_id) {
+        return Ok(());
+    }
+    let update = preview.cancel(session_id, persisted_appearance);
+    drop(preview);
     if let Some(update) = update {
         emit_appearance_update(&app, update);
     }
+    emit_language_update(&app, persisted_language);
     Ok(())
 }
 
@@ -450,6 +550,10 @@ fn get_effective_overlay_appearance(
 
 fn emit_appearance_update(app: &tauri::AppHandle, update: OverlayAppearanceUpdate) {
     let _ = app.emit_to("main", "ui://overlay-appearance-updated", update);
+}
+
+fn emit_language_update(app: &tauri::AppHandle, language: Language) {
+    let _ = app.emit_to("main", "ui://language-changed", language);
 }
 
 #[tauri::command]
@@ -504,7 +608,7 @@ pub fn run() {
                 exiting: AtomicBool::new(false),
             });
 
-            let menus = setup_menus(app, settings.overlay_size())?;
+            let menus = setup_menus(app, settings.overlay_size(), settings.language())?;
             app.manage(menus);
             if let Some(window) = app.get_webview_window("main") {
                 let (width, height) = overlay_dimensions(settings.overlay_size(), 0);
@@ -521,6 +625,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_usage_state,
             get_pace_state,
+            get_language,
             clear_pace_history,
             show_pace_settings,
             refresh_usage,
@@ -530,6 +635,7 @@ pub fn run() {
             get_overlay_size,
             begin_settings_session,
             preview_overlay_opacity,
+            preview_language,
             set_large_plan_visualization,
             save_editable_settings,
             cancel_settings_session,
@@ -545,23 +651,34 @@ fn build_size_submenu(
     app: &tauri::App,
     prefix: &str,
     selected: OverlaySize,
+    language: Language,
 ) -> tauri::Result<(Submenu<Wry>, SizeMenuItems)> {
-    let small = CheckMenuItemBuilder::with_id(format!("{prefix}-size-small"), "작게")
-        .checked(selected == OverlaySize::Small)
-        .build(app)?;
-    let middle = CheckMenuItemBuilder::with_id(format!("{prefix}-size-middle"), "보통")
-        .checked(selected == OverlaySize::Middle)
-        .build(app)?;
-    let large = CheckMenuItemBuilder::with_id(format!("{prefix}-size-large"), "크게")
-        .checked(selected == OverlaySize::Large)
-        .build(app)?;
-    let submenu = SubmenuBuilder::new(app, "오버레이 크기")
+    let small = CheckMenuItemBuilder::with_id(
+        format!("{prefix}-size-small"),
+        menu_text(language, "작게", "Small"),
+    )
+    .checked(selected == OverlaySize::Small)
+    .build(app)?;
+    let middle = CheckMenuItemBuilder::with_id(
+        format!("{prefix}-size-middle"),
+        menu_text(language, "보통", "Medium"),
+    )
+    .checked(selected == OverlaySize::Middle)
+    .build(app)?;
+    let large = CheckMenuItemBuilder::with_id(
+        format!("{prefix}-size-large"),
+        menu_text(language, "크게", "Large"),
+    )
+    .checked(selected == OverlaySize::Large)
+    .build(app)?;
+    let submenu = SubmenuBuilder::new(app, menu_text(language, "오버레이 크기", "Overlay size"))
         .items(&[&small, &middle, &large])
         .build()?;
 
     Ok((
-        submenu,
+        submenu.clone(),
         SizeMenuItems {
+            submenu,
             small,
             middle,
             large,
@@ -569,12 +686,27 @@ fn build_size_submenu(
     ))
 }
 
-fn setup_menus(app: &mut tauri::App, selected: OverlaySize) -> tauri::Result<OverlayMenus> {
-    let (tray_size_menu, tray_sizes) = build_size_submenu(app, "tray", selected)?;
-    let tray_toggle = MenuItemBuilder::with_id("tray-toggle", "표시/숨기기").build(app)?;
-    let tray_refresh = MenuItemBuilder::with_id("tray-refresh", "새로고침").build(app)?;
-    let tray_pace_settings = MenuItemBuilder::with_id("tray-pace-settings", "설정").build(app)?;
-    let tray_quit = MenuItemBuilder::with_id("tray-quit", "종료").build(app)?;
+fn setup_menus(
+    app: &mut tauri::App,
+    selected: OverlaySize,
+    language: Language,
+) -> tauri::Result<OverlayMenus> {
+    let (tray_size_menu, tray_sizes) = build_size_submenu(app, "tray", selected, language)?;
+    let tray_toggle = MenuItemBuilder::with_id(
+        "tray-toggle",
+        menu_text(language, "표시/숨기기", "Show/Hide"),
+    )
+    .build(app)?;
+    let tray_refresh =
+        MenuItemBuilder::with_id("tray-refresh", menu_text(language, "새로고침", "Refresh"))
+            .build(app)?;
+    let tray_pace_settings = MenuItemBuilder::with_id(
+        "tray-pace-settings",
+        menu_text(language, "설정", "Settings"),
+    )
+    .build(app)?;
+    let tray_quit =
+        MenuItemBuilder::with_id("tray-quit", menu_text(language, "종료", "Quit")).build(app)?;
     let tray_menu = MenuBuilder::new(app)
         .items(&[
             &tray_toggle,
@@ -585,12 +717,28 @@ fn setup_menus(app: &mut tauri::App, selected: OverlaySize) -> tauri::Result<Ove
         ])
         .build()?;
 
-    let (context_size_menu, context_sizes) = build_size_submenu(app, "context", selected)?;
-    let context_refresh = MenuItemBuilder::with_id("context-refresh", "새로고침").build(app)?;
-    let context_pace_settings =
-        MenuItemBuilder::with_id("context-pace-settings", "설정…").build(app)?;
-    let context_hide = MenuItemBuilder::with_id("context-hide", "오버레이 숨기기").build(app)?;
-    let context_quit = MenuItemBuilder::with_id("context-quit", "QuotaPacer 종료").build(app)?;
+    let (context_size_menu, context_sizes) =
+        build_size_submenu(app, "context", selected, language)?;
+    let context_refresh = MenuItemBuilder::with_id(
+        "context-refresh",
+        menu_text(language, "새로고침", "Refresh"),
+    )
+    .build(app)?;
+    let context_pace_settings = MenuItemBuilder::with_id(
+        "context-pace-settings",
+        menu_text(language, "설정…", "Settings…"),
+    )
+    .build(app)?;
+    let context_hide = MenuItemBuilder::with_id(
+        "context-hide",
+        menu_text(language, "오버레이 숨기기", "Hide overlay"),
+    )
+    .build(app)?;
+    let context_quit = MenuItemBuilder::with_id(
+        "context-quit",
+        menu_text(language, "QuotaPacer 종료", "Quit QuotaPacer"),
+    )
+    .build(app)?;
     let context = MenuBuilder::new(app)
         .item(&context_size_menu)
         .separator()
@@ -611,6 +759,14 @@ fn setup_menus(app: &mut tauri::App, selected: OverlaySize) -> tauri::Result<Ove
         context,
         tray_sizes,
         context_sizes,
+        tray_toggle,
+        tray_refresh,
+        tray_settings: tray_pace_settings,
+        tray_quit,
+        context_refresh,
+        context_settings: context_pace_settings,
+        context_hide,
+        context_quit,
     })
 }
 
@@ -969,6 +1125,20 @@ mod tests {
         assert_eq!(reverted.appearance, persisted);
         assert!(controller.preview(first_session, 2, 50).is_none());
         assert!(controller.preview(second_session, 1, 65).is_some());
+    }
+
+    #[test]
+    fn language_preview_rejects_stale_sessions_and_revisions() {
+        let persisted = appearance(100, LargePlanVisualization::Deviation);
+        let mut controller = OverlayAppearancePreviewController::default();
+        let (first_session, _) = controller.begin(persisted);
+
+        assert!(controller.preview_language(first_session, 1));
+        assert!(!controller.preview_language(first_session, 1));
+
+        let (second_session, _) = controller.begin(persisted);
+        assert!(!controller.preview_language(first_session, 2));
+        assert!(controller.preview_language(second_session, 1));
     }
 
     #[test]

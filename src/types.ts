@@ -71,6 +71,7 @@ export interface PaceViewState {
 }
 
 export type LargePlanVisualization = "deviation" | "weeklyAllocation";
+export type Language = "ko" | "en";
 
 export interface PaceSettings {
   weekdayWeights: number[];
@@ -80,6 +81,7 @@ export interface PaceSettings {
 export interface EditableSettings {
   paceSettings: PaceSettings;
   overlayOpacity: number;
+  language: Language;
 }
 
 export interface SettingsSession {

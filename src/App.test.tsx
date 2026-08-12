@@ -102,34 +102,34 @@ function mockStartup(
 ) {
   mocks.invoke.mockImplementation(
     (command: string, args?: { largePlanVisualization?: string }) => {
-    if (command === "get_usage_state") return Promise.resolve(usage);
-    if (command === "get_pace_state") return Promise.resolve(pace);
-    if (command === "get_overlay_size") return Promise.resolve(size);
-    if (command === "get_effective_overlay_appearance")
-      return Promise.resolve({
-        appearance: {
-          overlayOpacity: 100,
-          largePlanVisualization,
-        },
-        phase: "committed",
-        updateId: 0,
-      });
-    if (command === "get_codex_executable_preference")
-      return Promise.resolve(configuredCliPath);
-    if (command === "set_codex_executable" && setCodexError)
-      return Promise.reject(setCodexError);
-    if (command === "set_large_plan_visualization") {
-      if (setVisualizationResult) return setVisualizationResult;
-      return Promise.resolve({
-        appearance: {
-          overlayOpacity: 100,
-          largePlanVisualization: args?.largePlanVisualization,
-        },
-        phase: "committed",
-        updateId: 1,
-      });
-    }
-    return Promise.resolve();
+      if (command === "get_usage_state") return Promise.resolve(usage);
+      if (command === "get_pace_state") return Promise.resolve(pace);
+      if (command === "get_overlay_size") return Promise.resolve(size);
+      if (command === "get_effective_overlay_appearance")
+        return Promise.resolve({
+          appearance: {
+            overlayOpacity: 100,
+            largePlanVisualization,
+          },
+          phase: "committed",
+          updateId: 0,
+        });
+      if (command === "get_codex_executable_preference")
+        return Promise.resolve(configuredCliPath);
+      if (command === "set_codex_executable" && setCodexError)
+        return Promise.reject(setCodexError);
+      if (command === "set_large_plan_visualization") {
+        if (setVisualizationResult) return setVisualizationResult;
+        return Promise.resolve({
+          appearance: {
+            overlayOpacity: 100,
+            largePlanVisualization: args?.largePlanVisualization,
+          },
+          phase: "committed",
+          updateId: 1,
+        });
+      }
+      return Promise.resolve();
     },
   );
 }
@@ -587,10 +587,9 @@ describe("Codex 사용량 오버레이", () => {
     fireEvent.click(toggle);
 
     expect(mocks.startDragging).not.toHaveBeenCalled();
-    expect(mocks.invoke).toHaveBeenCalledWith(
-      "set_large_plan_visualization",
-      { largePlanVisualization: "weeklyAllocation" },
-    );
+    expect(mocks.invoke).toHaveBeenCalledWith("set_large_plan_visualization", {
+      largePlanVisualization: "weeklyAllocation",
+    });
     await waitFor(() =>
       expect(container.querySelectorAll(".allocation-track")).toHaveLength(2),
     );
@@ -1112,5 +1111,19 @@ describe("Codex 사용량 오버레이", () => {
 
     expect(await screen.findByText("사용량 한도 없음")).toBeInTheDocument();
     expect(screen.queryByText(/% 남음/)).not.toBeInTheDocument();
+  });
+
+  it("저장된 언어 변경 이벤트를 받으면 오버레이를 영어로 전환한다", async () => {
+    render(<App />);
+    expect(await screen.findByText("주간")).toBeInTheDocument();
+
+    mocks.listeners.get("ui://language-changed")?.({ payload: "en" });
+
+    expect(await screen.findByText("Weekly")).toBeInTheDocument();
+    expect(screen.getByText("74% remaining")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "More menu" }),
+    ).toBeInTheDocument();
+    expect(document.documentElement).toHaveAttribute("lang", "en");
   });
 });

@@ -15,10 +15,11 @@ import {
 } from "@tauri-apps/plugin-notification";
 import type { EditableSettings, PaceSettings, SettingsSession } from "./types";
 import { DEFAULT_OVERLAY_OPACITY, MIN_OVERLAY_OPACITY } from "./types";
+import { DEFAULT_LANGUAGE, text } from "./i18n";
 import "./SettingsApp.css";
 
-const DAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"];
-const FULL_DAY_LABELS = [
+const KOREAN_DAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"];
+const KOREAN_FULL_DAY_LABELS = [
   "월요일",
   "화요일",
   "수요일",
@@ -26,6 +27,16 @@ const FULL_DAY_LABELS = [
   "금요일",
   "토요일",
   "일요일",
+];
+const ENGLISH_DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const ENGLISH_FULL_DAY_LABELS = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
 ];
 const DEFAULT_WEEKDAY_WEIGHTS = [5, 5, 5, 5, 5, 5, 5];
 const WEEKDAY_WEIGHT_PRESETS = {
@@ -41,6 +52,7 @@ const DEFAULT_PACE_SETTINGS: PaceSettings = {
 const DEFAULT_EDITABLE_SETTINGS: EditableSettings = {
   paceSettings: DEFAULT_PACE_SETTINGS,
   overlayOpacity: DEFAULT_OVERLAY_OPACITY,
+  language: DEFAULT_LANGUAGE,
 };
 
 type PermissionStatus = "checking" | "granted" | "denied";
@@ -48,6 +60,7 @@ type PermissionStatus = "checking" | "granted" | "denied";
 function settingsEqual(left: EditableSettings, right: EditableSettings) {
   return (
     left.overlayOpacity === right.overlayOpacity &&
+    left.language === right.language &&
     left.paceSettings.osNotificationsEnabled ===
       right.paceSettings.osNotificationsEnabled &&
     left.paceSettings.weekdayWeights.length ===
@@ -93,13 +106,16 @@ export function normalizeWeekdayWeights(weights: number[]) {
   return tenths.map((value) => value / 10);
 }
 
-function weekdayWeightLabel(weight: number) {
-  if (weight === 0) return "사용 안 함";
-  if (weight <= 2) return "매우 낮음";
-  if (weight <= 4) return "낮음";
-  if (weight === 5) return "보통";
-  if (weight <= 8) return "높음";
-  return "매우 높음";
+function weekdayWeightLabel(
+  language: EditableSettings["language"],
+  weight: number,
+) {
+  if (weight === 0) return text(language, "사용 안 함", "Off");
+  if (weight <= 2) return text(language, "매우 낮음", "Very low");
+  if (weight <= 4) return text(language, "낮음", "Low");
+  if (weight === 5) return text(language, "보통", "Medium");
+  if (weight <= 8) return text(language, "높음", "High");
+  return text(language, "매우 높음", "Very high");
 }
 
 function SettingsApp() {
@@ -123,6 +139,7 @@ function SettingsApp() {
   const sessionLoadRunningRef = useRef(false);
   const sessionReloadRequestedRef = useRef(false);
   const previewRevisionRef = useRef(0);
+  const languagePreviewRevisionRef = useRef(0);
   const previewFrameRef = useRef<number | null>(null);
   const pendingOpacityRef = useRef(DEFAULT_OVERLAY_OPACITY);
   const requestCloseRef = useRef<() => void>(() => undefined);
@@ -131,6 +148,10 @@ function SettingsApp() {
 
   const paceSettings = draftSettings.paceSettings;
   const opacity = draftSettings.overlayOpacity;
+  const language = draftSettings.language;
+  const dayLabels = language === "en" ? ENGLISH_DAY_LABELS : KOREAN_DAY_LABELS;
+  const fullDayLabels =
+    language === "en" ? ENGLISH_FULL_DAY_LABELS : KOREAN_FULL_DAY_LABELS;
   const weekdayAllocations = useMemo(
     () => normalizeWeekdayWeights(paceSettings.weekdayWeights),
     [paceSettings.weekdayWeights],
@@ -200,6 +221,7 @@ function SettingsApp() {
         : session.settings;
       sessionIdRef.current = session.sessionId;
       previewRevisionRef.current = 0;
+      languagePreviewRevisionRef.current = 0;
       pendingOpacityRef.current = session.settings.overlayOpacity;
       setSessionId(session.sessionId);
       setPersistedSettings(session.settings);
@@ -207,8 +229,16 @@ function SettingsApp() {
       setCloseDialogOpen(false);
       setWeightMessage(
         recovered
-          ? "잘못된 요일별 강도 초안을 균등 배분으로 복구했습니다."
-          : "막대를 움직여 주간 사용 패턴을 만들어보세요.",
+          ? text(
+              recoveredSettings.language,
+              "잘못된 요일별 강도 초안을 균등 배분으로 복구했습니다.",
+              "Invalid daily intensity values were restored to an even distribution.",
+            )
+          : text(
+              recoveredSettings.language,
+              "막대를 움직여 주간 사용 패턴을 만들어보세요.",
+              "Move the bars to shape your weekly usage pattern.",
+            ),
       );
       return recovered;
     },
@@ -229,7 +259,11 @@ function SettingsApp() {
         const recovered = applySession(session);
         setMessage(
           recovered
-            ? "잘못된 요일별 강도 초안을 균등 배분으로 복구했습니다."
+            ? text(
+                session.settings.language,
+                "잘못된 요일별 강도 초안을 균등 배분으로 복구했습니다.",
+                "Invalid daily intensity values were restored to an even distribution.",
+              )
             : "",
         );
       } catch (error) {
@@ -265,6 +299,24 @@ function SettingsApp() {
       });
     });
   }, []);
+
+  const previewLanguage = (nextLanguage: EditableSettings["language"]) => {
+    const activeSessionId = sessionIdRef.current;
+    if (activeSessionId === null) return;
+    const revision = ++languagePreviewRevisionRef.current;
+    void invoke("preview_language", {
+      sessionId: activeSessionId,
+      revision,
+      language: nextLanguage,
+    }).catch((error) => {
+      if (
+        sessionIdRef.current === activeSessionId &&
+        languagePreviewRevisionRef.current === revision
+      ) {
+        setMessage(String(error));
+      }
+    });
+  };
 
   const cancelSessionAndHide = useCallback(async () => {
     cancelScheduledPreview();
@@ -326,6 +378,10 @@ function SettingsApp() {
   ]);
 
   useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
+
+  useEffect(() => {
     const unlistenClose = listen("ui://settings-close-requested", () =>
       requestCloseRef.current(),
     );
@@ -362,7 +418,13 @@ function SettingsApp() {
       (currentWeight, item) => (item === index ? weight : currentWeight),
     );
     if (nextWeights.every((currentWeight) => currentWeight === 0)) {
-      setWeightMessage("최소 한 요일의 사용 강도는 1 이상이어야 합니다.");
+      setWeightMessage(
+        text(
+          language,
+          "최소 한 요일의 사용 강도는 1 이상이어야 합니다.",
+          "At least one day must have an intensity of 1 or higher.",
+        ),
+      );
       setMessage("");
       return;
     }
@@ -374,7 +436,11 @@ function SettingsApp() {
       },
     }));
     setWeightMessage(
-      `${FULL_DAY_LABELS[index]} 강도를 ${weight}단계 · ${weekdayWeightLabel(weight)}으로 변경했습니다.`,
+      text(
+        language,
+        `${fullDayLabels[index]} 강도를 ${weight}단계 · ${weekdayWeightLabel(language, weight)}으로 변경했습니다.`,
+        `${fullDayLabels[index]} intensity changed to level ${weight} · ${weekdayWeightLabel(language, weight)}.`,
+      ),
     );
     setMessage("");
   };
@@ -391,7 +457,13 @@ function SettingsApp() {
         weekdayWeights: [...weights],
       },
     }));
-    setWeightMessage(`${label} 강도 패턴을 적용했습니다.`);
+    setWeightMessage(
+      text(
+        language,
+        `${label} 강도 패턴을 적용했습니다.`,
+        `${label} intensity pattern applied.`,
+      ),
+    );
     setMessage("");
   };
 
@@ -431,13 +503,21 @@ function SettingsApp() {
       }));
       if (!granted) {
         setMessage(
-          "알림 권한이 거부되었습니다. 인라인 경고는 계속 표시됩니다.",
+          text(
+            language,
+            "알림 권한이 거부되었습니다. 인라인 경고는 계속 표시됩니다.",
+            "Notification permission was denied. Inline warnings will remain visible.",
+          ),
         );
       }
     } catch {
       setPermission("denied");
       setMessage(
-        "알림 권한을 확인할 수 없습니다. 인라인 경고는 계속 표시됩니다.",
+        text(
+          language,
+          "알림 권한을 확인할 수 없습니다. 인라인 경고는 계속 표시됩니다.",
+          "Notification permission could not be checked. Inline warnings will remain visible.",
+        ),
       );
     } finally {
       setRequestingPermission(false);
@@ -463,7 +543,13 @@ function SettingsApp() {
         settings: draftSettings,
       });
       applySession(session);
-      setMessage("설정을 저장했습니다.");
+      setMessage(
+        text(
+          session.settings.language,
+          "설정을 저장했습니다.",
+          "Settings saved.",
+        ),
+      );
       if (closeAfterSave) {
         await invoke("cancel_settings_session", {
           sessionId: session.sessionId,
@@ -484,7 +570,13 @@ function SettingsApp() {
     setMessage("");
     try {
       await invoke("clear_pace_history");
-      setMessage("최근 페이스 이력과 알림 상태를 삭제했습니다.");
+      setMessage(
+        text(
+          language,
+          "최근 페이스 이력과 알림 상태를 삭제했습니다.",
+          "Recent pace history and notification state were deleted.",
+        ),
+      );
     } catch (error) {
       setMessage(String(error));
     } finally {
@@ -497,12 +589,12 @@ function SettingsApp() {
       <header data-tauri-drag-region>
         <div data-tauri-drag-region>
           <p data-tauri-drag-region>Codex Pace</p>
-          <h1 data-tauri-drag-region>설정</h1>
+          <h1 data-tauri-drag-region>{text(language, "설정", "Settings")}</h1>
         </div>
         <button
           className="icon-button"
           type="button"
-          aria-label="설정 닫기"
+          aria-label={text(language, "설정 닫기", "Close settings")}
           onClick={requestClose}
         >
           ×
@@ -511,27 +603,70 @@ function SettingsApp() {
 
       <div className="settings-content">
         <section>
-          <div className="weekly-plan-heading">
+          <div className="setting-row language-setting">
             <div>
-              <h2>주간 사용 계획</h2>
+              <h2>{text(language, "언어", "Language")}</h2>
               <p className="section-help">
-                요일별 상대 강도를 정하면 실제 배분을 100%로 계산합니다.
+                {text(
+                  language,
+                  "오버레이, 메뉴와 알림에 사용할 언어입니다.",
+                  "Used for the overlay, menus, and notifications.",
+                )}
               </p>
             </div>
-            <strong>합계 100.0%</strong>
+            <select
+              aria-label={text(language, "표시 언어", "Display language")}
+              value={language}
+              disabled={formBusy}
+              onChange={(event) => {
+                const nextLanguage = event.target.value === "en" ? "en" : "ko";
+                setDraftSettings((current) => ({
+                  ...current,
+                  language: nextLanguage,
+                }));
+                previewLanguage(nextLanguage);
+                setWeightMessage(
+                  text(
+                    nextLanguage,
+                    "막대를 움직여 주간 사용 패턴을 만들어보세요.",
+                    "Move the bars to shape your weekly usage pattern.",
+                  ),
+                );
+                setMessage("");
+              }}
+            >
+              <option value="ko">한국어</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+        </section>
+
+        <section>
+          <div className="weekly-plan-heading">
+            <h2>{text(language, "주간 사용 계획", "Weekly usage plan")}</h2>
+            <strong>{text(language, "합계", "Total")} 100.0%</strong>
+            <p className="section-help">
+              {text(
+                language,
+                "요일별 상대 강도를 정하면 실제 배분을 100%로 계산합니다.",
+                "Set a relative intensity for each day; allocation is normalized to 100%.",
+              )}
+            </p>
           </div>
 
           <div
             className="weekday-distribution"
             role="img"
-            aria-label={`요일별 계산 배분, ${FULL_DAY_LABELS.map(
-              (label, index) =>
-                `${label} ${weekdayAllocations[index].toFixed(1)}%`,
-            ).join(", ")}`}
+            aria-label={`${text(language, "요일별 계산 배분", "Calculated daily allocation")}, ${fullDayLabels
+              .map(
+                (label, index) =>
+                  `${label} ${weekdayAllocations[index].toFixed(1)}%`,
+              )
+              .join(", ")}`}
           >
             {weekdayAllocations.map((allocation, index) => (
               <span
-                key={FULL_DAY_LABELS[index]}
+                key={fullDayLabels[index]}
                 style={{ width: `${allocation}%` }}
               />
             ))}
@@ -540,13 +675,17 @@ function SettingsApp() {
           <div
             className="weekday-presets"
             role="group"
-            aria-label="빠른 강도 선택"
+            aria-label={text(
+              language,
+              "빠른 강도 선택",
+              "Quick intensity presets",
+            )}
           >
             {(
               [
-                ["even", "균등 배분"],
-                ["weekday", "평일 중심"],
-                ["weekend", "주말 중심"],
+                ["even", text(language, "균등 배분", "Even")],
+                ["weekday", text(language, "평일 중심", "Weekday focused")],
+                ["weekend", text(language, "주말 중심", "Weekend focused")],
               ] as const
             ).map(([preset, label]) => (
               <button
@@ -563,21 +702,33 @@ function SettingsApp() {
 
           <div className="weekday-editor">
             <div className="weekday-editor-heading">
-              <h3>요일별 사용 강도</h3>
-              <span>막대는 자동으로 움직이지 않습니다</span>
+              <h3>
+                {text(language, "요일별 사용 강도", "Daily usage intensity")}
+              </h3>
+              <span>
+                {text(
+                  language,
+                  "막대는 자동으로 움직이지 않습니다",
+                  "Bars do not move automatically",
+                )}
+              </span>
             </div>
             <div
               className="weekday-equalizer"
-              aria-label="요일별 상대 사용 강도"
+              aria-label={text(
+                language,
+                "요일별 상대 사용 강도",
+                "Relative daily usage intensity",
+              )}
             >
-              {DAY_LABELS.map((label, index) => {
+              {dayLabels.map((label, index) => {
                 const inputId = `weekday-weight-${index}`;
                 const weight = paceSettings.weekdayWeights[index];
                 const allocation = weekdayAllocations[index];
                 return (
-                  <div className="weekday-weight" key={label}>
+                  <div className="weekday-weight" key={inputId}>
                     <span className="weekday-weight-level">
-                      {weekdayWeightLabel(weight)}
+                      {weekdayWeightLabel(language, weight)}
                     </span>
                     <div className="weekday-weight-control">
                       <span
@@ -594,8 +745,16 @@ function SettingsApp() {
                         min="0"
                         max="10"
                         step="1"
-                        aria-label={`${FULL_DAY_LABELS[index]} 상대 사용 강도`}
-                        aria-valuetext={`${weekdayWeightLabel(weight)}, 실제 배분 ${allocation.toFixed(1)}%`}
+                        aria-label={text(
+                          language,
+                          `${fullDayLabels[index]} 상대 사용 강도`,
+                          `${fullDayLabels[index]} relative usage intensity`,
+                        )}
+                        aria-valuetext={text(
+                          language,
+                          `${weekdayWeightLabel(language, weight)}, 실제 배분 ${allocation.toFixed(1)}%`,
+                          `${weekdayWeightLabel(language, weight)}, actual allocation ${allocation.toFixed(1)}%`,
+                        )}
                         disabled={formBusy}
                         value={weight}
                         onChange={(event) =>
@@ -615,16 +774,24 @@ function SettingsApp() {
           </div>
 
           <p className="weekday-boundary-help">
-            각 요일은 주간 제한 창의 초기화 시각부터 시작되는 24시간 구간입니다.
+            {text(
+              language,
+              "각 요일은 주간 제한 창의 초기화 시각부터 시작되는 24시간 구간입니다.",
+              "Each day is a 24-hour segment beginning at the weekly limit's reset time.",
+            )}
           </p>
         </section>
 
         <section>
           <div className="setting-row opacity-setting">
             <div>
-              <h2>오버레이 투명도</h2>
+              <h2>{text(language, "오버레이 투명도", "Overlay opacity")}</h2>
               <p className="section-help">
-                낮을수록 배경이 더 많이 비칩니다. 최소 40%입니다.
+                {text(
+                  language,
+                  "낮을수록 배경이 더 많이 비칩니다. 최소 40%입니다.",
+                  "Lower values reveal more of the background. The minimum is 40%.",
+                )}
               </p>
             </div>
           </div>
@@ -644,8 +811,12 @@ function SettingsApp() {
               min={MIN_OVERLAY_OPACITY}
               max="100"
               step="5"
-              aria-label="오버레이 투명도"
-              aria-valuetext={`${opacity}% · 낮을수록 더 투명함`}
+              aria-label={text(language, "오버레이 투명도", "Overlay opacity")}
+              aria-valuetext={text(
+                language,
+                `${opacity}% · 낮을수록 더 투명함`,
+                `${opacity}% · lower is more transparent`,
+              )}
               disabled={formBusy || sessionId === null}
               value={opacity}
               onPointerDown={() => {
@@ -676,15 +847,25 @@ function SettingsApp() {
         <section>
           <div className="setting-row">
             <div>
-              <h2>OS 경고 알림</h2>
+              <h2>
+                {text(language, "OS 경고 알림", "OS warning notifications")}
+              </h2>
               <p className="section-help">
-                계획 초과나 초기화 전 소진 위험을 창 세대별로 한 번 알립니다.
+                {text(
+                  language,
+                  "계획 초과나 초기화 전 소진 위험을 창 세대별로 한 번 알립니다.",
+                  "Alerts once per limit window when usage exceeds the plan or may run out before reset.",
+                )}
               </p>
             </div>
             <label className="switch">
               <input
                 type="checkbox"
-                aria-label="OS 경고 알림 사용"
+                aria-label={text(
+                  language,
+                  "OS 경고 알림 사용",
+                  "Enable OS warning notifications",
+                )}
                 checked={paceSettings.osNotificationsEnabled}
                 disabled={formBusy}
                 onChange={(event) =>
@@ -695,22 +876,25 @@ function SettingsApp() {
             </label>
           </div>
           <p className="permission-state">
-            권한:{" "}
+            {text(language, "권한:", "Permission:")}{" "}
             {permission === "checking"
-              ? "확인 중"
+              ? text(language, "확인 중", "Checking")
               : permission === "granted"
-                ? "허용됨"
-                : "허용되지 않음"}
+                ? text(language, "허용됨", "Granted")
+                : text(language, "허용되지 않음", "Not granted")}
           </p>
         </section>
 
         <section>
           <div className="setting-row">
             <div>
-              <h2>최근 이력</h2>
+              <h2>{text(language, "최근 이력", "Recent history")}</h2>
               <p className="section-help">
-                최근 사용률 이력과 알림 중복 방지 상태를 최대 25시간 보존합니다.
-                계정 정보는 저장하지 않습니다.
+                {text(
+                  language,
+                  "최근 사용률 이력과 알림 중복 방지 상태를 최대 25시간 보존합니다. 계정 정보는 저장하지 않습니다.",
+                  "Usage history and notification deduplication state are kept for up to 25 hours. Account information is not stored.",
+                )}
               </p>
             </div>
             <button
@@ -719,7 +903,7 @@ function SettingsApp() {
               disabled={clearingHistory || saving}
               onClick={() => void clearHistory()}
             >
-              이력 삭제
+              {text(language, "이력 삭제", "Delete history")}
             </button>
           </div>
         </section>
@@ -733,7 +917,7 @@ function SettingsApp() {
           disabled={formBusy || !weightsValid || !dirty || sessionId === null}
           onClick={() => void save()}
         >
-          저장
+          {text(language, "저장", "Save")}
         </button>
       </footer>
 
@@ -746,9 +930,15 @@ function SettingsApp() {
             aria-labelledby="unsaved-title"
             aria-describedby="unsaved-description"
           >
-            <h2 id="unsaved-title">변경사항을 저장할까요?</h2>
+            <h2 id="unsaved-title">
+              {text(language, "변경사항을 저장할까요?", "Save your changes?")}
+            </h2>
             <p id="unsaved-description">
-              저장하지 않으면 오버레이 미리보기를 포함한 변경사항이 사라집니다.
+              {text(
+                language,
+                "저장하지 않으면 오버레이 미리보기를 포함한 변경사항이 사라집니다.",
+                "Unsaved changes, including the overlay preview, will be lost.",
+              )}
             </p>
             <div className="confirm-actions">
               <button
@@ -757,7 +947,7 @@ function SettingsApp() {
                 disabled={formBusy || !weightsValid}
                 onClick={() => void save(true)}
               >
-                저장
+                {text(language, "저장", "Save")}
               </button>
               <button
                 className="danger-button"
@@ -765,7 +955,7 @@ function SettingsApp() {
                 disabled={formBusy}
                 onClick={() => void cancelSessionAndHide()}
               >
-                변경사항 폐기
+                {text(language, "변경사항 폐기", "Discard changes")}
               </button>
               <button
                 className="secondary-button"
@@ -774,7 +964,7 @@ function SettingsApp() {
                 autoFocus
                 onClick={() => setCloseDialogOpen(false)}
               >
-                계속 편집
+                {text(language, "계속 편집", "Keep editing")}
               </button>
             </div>
           </div>

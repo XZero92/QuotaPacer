@@ -7,8 +7,23 @@ html.settings-view #root {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
+}
+
+.language-setting select {
+  min-width: 128px;
+  padding: 8px 34px 8px 10px;
+  color: #f3f5f7;
+  background: #20242b;
+  border: 1px solid #3a404a;
+  border-radius: 8px;
+}
+
+.language-setting select:focus-visible {
+  outline: 2px solid #72e6ad;
+  outline-offset: 2px;
 }
 
 .settings-page {
@@ -107,7 +122,6 @@ input {
   margin: 9px 0 0;
 }
 
-.weekly-plan-heading,
 .weekday-editor-heading {
   display: flex;
   align-items: flex-start;
@@ -115,12 +129,24 @@ input {
   gap: 12px;
 }
 
+.weekly-plan-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 12px;
+  align-items: start;
+}
+
+.weekly-plan-heading h2,
+.weekly-plan-heading > strong {
+  white-space: nowrap;
+}
+
 .weekly-plan-heading .section-help {
-  margin-bottom: 0;
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
 }
 
 .weekly-plan-heading > strong {
-  flex: 0 0 auto;
   color: #72e6ad;
   font-size: 12px;
 }
@@ -286,7 +312,8 @@ input {
 }
 
 .weekday-boundary-help {
-  margin: 9px 0 0;
+  margin: 0;
+  padding-top: 20px;
 }
 
 .setting-row {

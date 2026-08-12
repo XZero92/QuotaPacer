@@ -12,6 +12,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   CliInfo,
+  Language,
   LargePlanVisualization,
   OverlayAppearancePhase,
   OverlayAppearanceUpdate,
@@ -22,6 +23,14 @@ import type {
   UsageWindow,
 } from "./types";
 import { DEFAULT_OVERLAY_OPACITY, MIN_OVERLAY_OPACITY } from "./types";
+import {
+  DEFAULT_LANGUAGE,
+  isLanguage,
+  LanguageProvider,
+  locale,
+  text,
+  useLanguage,
+} from "./i18n";
 import {
   featuredWindow,
   formatResetTime,
@@ -61,20 +70,39 @@ function isLargePlanVisualization(
   return value === "deviation" || value === "weeklyAllocation";
 }
 
-function errorTitle(connection: UsageViewState["connection"]) {
+function errorTitle(
+  connection: UsageViewState["connection"],
+  language: Language,
+) {
   switch (connection) {
     case "cli_missing":
-      return "Codex CLI가 필요합니다";
+      return text(language, "Codex CLI가 필요합니다", "Codex CLI required");
     case "cli_unsupported":
-      return "Codex CLI를 업데이트해 주세요";
+      return text(
+        language,
+        "Codex CLI를 업데이트해 주세요",
+        "Update Codex CLI",
+      );
     case "login_required":
-      return "Codex 로그인이 필요합니다";
+      return text(
+        language,
+        "Codex 로그인이 필요합니다",
+        "Codex login required",
+      );
     case "unsupported_auth":
-      return "ChatGPT 로그인이 필요합니다";
+      return text(
+        language,
+        "ChatGPT 로그인이 필요합니다",
+        "ChatGPT login required",
+      );
     case "error":
-      return "사용량을 불러오지 못했습니다";
+      return text(
+        language,
+        "사용량을 불러오지 못했습니다",
+        "Couldn't load usage",
+      );
     default:
-      return "Codex 사용량";
+      return text(language, "Codex 사용량", "Codex usage");
   }
 }
 
@@ -82,25 +110,32 @@ function canRecoverCli(connection: UsageViewState["connection"]) {
   return connection === "cli_missing" || connection === "cli_unsupported";
 }
 
-function cliActionErrorMessage(error: unknown) {
-  if (typeof error === "string") return error;
-  if (error instanceof Error) return error.message;
-  return "Codex CLI 설정을 변경하지 못했습니다.";
+function cliActionErrorMessage(error: unknown, language: Language) {
+  if (language === "ko") {
+    if (typeof error === "string") return error;
+    if (error instanceof Error) return error.message;
+  }
+  return text(
+    language,
+    "Codex CLI 설정을 변경하지 못했습니다.",
+    "Couldn't change the Codex CLI setting.",
+  );
 }
 
-function windowLabel(window: UsageWindow) {
-  const duration = formatWindowDuration(window.windowDurationMins);
+function windowLabel(window: UsageWindow, language: Language) {
+  const duration = formatWindowDuration(window.windowDurationMins, language);
   return window.bucketLabel ? `${duration} · ${window.bucketLabel}` : duration;
 }
 
 function WindowHeadingLabel({ window }: { window: UsageWindow }) {
+  const language = useLanguage();
   return (
     <strong className="window-label">
       <span className="brand-label">Codex</span>
       <span className="label-separator" aria-hidden="true">
         ·
       </span>
-      <span>{windowLabel(window)}</span>
+      <span>{windowLabel(window, language)}</span>
     </strong>
   );
 }
@@ -110,13 +145,14 @@ function MoreMenuButton({
 }: {
   onOpen: (position: OverlayMenuPosition) => void;
 }) {
+  const language = useLanguage();
   return (
     <button
       type="button"
       className="more-menu-button"
-      aria-label="더보기 메뉴"
+      aria-label={text(language, "더보기 메뉴", "More menu")}
       aria-haspopup="menu"
-      title="더보기 메뉴"
+      title={text(language, "더보기 메뉴", "More menu")}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => {
         const bounds = event.currentTarget.getBoundingClientRect();
@@ -143,12 +179,13 @@ function EmptySurface({
   recovery?: CliRecoveryActions;
   onOpenMenu: (position: OverlayMenuPosition) => void;
 }) {
+  const language = useLanguage();
   const title =
     usage.connection === "starting"
-      ? "사용량 확인 중"
+      ? text(language, "사용량 확인 중", "Checking usage")
       : usage.connection === "no_limits"
-        ? "사용량 한도 없음"
-        : errorTitle(usage.connection);
+        ? text(language, "사용량 한도 없음", "No usage limits")
+        : errorTitle(usage.connection, language);
 
   if (compact) {
     return (
@@ -166,11 +203,15 @@ function EmptySurface({
               onPointerDown={(event) => event.stopPropagation()}
               onClick={() => void recovery.choose()}
             >
-              {recovery.pending ? "확인 중" : "CLI 선택"}
+              {recovery.pending
+                ? text(language, "확인 중", "Checking")
+                : text(language, "CLI 선택", "Choose CLI")}
             </button>
           ) : (
             <small>
-              {usage.connection === "starting" ? "확인 중" : "상태 확인"}
+              {usage.connection === "starting"
+                ? text(language, "확인 중", "Checking")
+                : text(language, "상태 확인", "Check status")}
             </small>
           )}
         </div>
@@ -189,8 +230,12 @@ function EmptySurface({
         </strong>
         <small>
           {recovery?.error ??
-            usage.errorMessage ??
-            "Codex 계정 상태를 확인합니다"}
+            (language === "ko" ? usage.errorMessage : null) ??
+            text(
+              language,
+              "Codex 계정 상태를 확인합니다",
+              "Check your Codex account status",
+            )}
         </small>
       </div>
       {recovery && (
@@ -202,10 +247,10 @@ function EmptySurface({
             onClick={() => void recovery.choose()}
           >
             {recovery.pending
-              ? "확인 중"
+              ? text(language, "확인 중", "Checking")
               : usage.connection === "cli_unsupported"
-                ? "다른 CLI 선택"
-                : "CLI 선택"}
+                ? text(language, "다른 CLI 선택", "Choose another CLI")
+                : text(language, "CLI 선택", "Choose CLI")}
           </button>
           {recovery.configuredPath && (
             <button
@@ -215,7 +260,7 @@ function EmptySurface({
               onPointerDown={(event) => event.stopPropagation()}
               onClick={() => void recovery.useAutomatic()}
             >
-              자동 탐지
+              {text(language, "자동 탐지", "Auto-detect")}
             </button>
           )}
         </div>
@@ -254,6 +299,7 @@ function SmallOverlay({
   recovery?: CliRecoveryActions;
   onOpenMenu: (position: OverlayMenuPosition) => void;
 }) {
+  const language = useLanguage();
   if (!featured) {
     return (
       <EmptySurface
@@ -269,14 +315,22 @@ function SmallOverlay({
   const planLabel =
     plannedRemaining === null
       ? ""
-      : `, 현재 시각 계획 기준 ${Math.round(plannedRemaining)}% 남음`;
+      : text(
+          language,
+          `, 현재 시각 계획 기준 ${Math.round(plannedRemaining)}% 남음`,
+          `, ${Math.round(plannedRemaining)}% remaining by the current plan`,
+        );
 
   return (
     <div
       className={`small-card tone-${usageTone(featured.remainingPercent)} ${
         usage.connection === "stale" ? "is-stale" : ""
       }`}
-      aria-label={`Codex · ${windowLabel(featured)} 제한 ${featured.remainingPercent}% 남음`}
+      aria-label={text(
+        language,
+        `Codex · ${windowLabel(featured, language)} 제한 ${featured.remainingPercent}% 남음`,
+        `Codex · ${windowLabel(featured, language)} limit, ${featured.remainingPercent}% remaining`,
+      )}
     >
       <div
         className="small-ring"
@@ -286,7 +340,11 @@ function SmallOverlay({
             "--plan-remaining": plannedRemaining ?? 0,
           } as React.CSSProperties
         }
-        aria-label={`${featured.remainingPercent}% 남음 원형 게이지${planLabel}`}
+        aria-label={text(
+          language,
+          `${featured.remainingPercent}% 남음 원형 게이지${planLabel}`,
+          `Circular gauge, ${featured.remainingPercent}% remaining${planLabel}`,
+        )}
       >
         {plannedRemaining !== null && (
           <i className="small-plan-marker" aria-hidden="true" />
@@ -296,8 +354,10 @@ function SmallOverlay({
       <div className="small-copy">
         <strong>Codex</strong>
         <small>
-          {formatWindowDuration(featured.windowDurationMins)}
-          {usage.connection === "stale" ? " · 지연" : ""}
+          {formatWindowDuration(featured.windowDurationMins, language)}
+          {usage.connection === "stale"
+            ? text(language, " · 지연", " · delayed")
+            : ""}
         </small>
       </div>
       {usage.connection === "stale" && (
@@ -321,13 +381,10 @@ function MiddleOverlay({
   recovery?: CliRecoveryActions;
   onOpenMenu: (position: OverlayMenuPosition) => void;
 }) {
+  const language = useLanguage();
   if (!featured) {
     return (
-      <EmptySurface
-        usage={usage}
-        recovery={recovery}
-        onOpenMenu={onOpenMenu}
-      />
+      <EmptySurface usage={usage} recovery={recovery} onOpenMenu={onOpenMenu} />
     );
   }
 
@@ -335,7 +392,11 @@ function MiddleOverlay({
   const planLabel =
     plannedRemaining === null
       ? ""
-      : `, 현재 시각 계획 기준 ${Math.round(plannedRemaining)}% 남음`;
+      : text(
+          language,
+          `, 현재 시각 계획 기준 ${Math.round(plannedRemaining)}% 남음`,
+          `, ${Math.round(plannedRemaining)}% remaining by the current plan`,
+        );
 
   return (
     <div className="middle-card">
@@ -344,7 +405,11 @@ function MiddleOverlay({
       </div>
       <div
         className="usage-meter"
-        aria-label={`${featured.remainingPercent}% 남음${planLabel}`}
+        aria-label={text(
+          language,
+          `${featured.remainingPercent}% 남음${planLabel}`,
+          `${featured.remainingPercent}% remaining${planLabel}`,
+        )}
       >
         <span
           className={`tone-${usageTone(featured.remainingPercent)}`}
@@ -361,14 +426,22 @@ function MiddleOverlay({
       <div className="middle-footer">
         <small>
           {usage.connection === "stale"
-            ? staleLabel(usage.lastSuccessfulAt)
-            : `${formatResetTime(featured.resetsAt)} 리셋`}
+            ? staleLabel(usage.lastSuccessfulAt, undefined, language)
+            : text(
+                language,
+                `${formatResetTime(featured.resetsAt, language)} 리셋`,
+                `Resets ${formatResetTime(featured.resetsAt, language)}`,
+              )}
         </small>
         <span
           className={`middle-remaining tone-text-${usageTone(featured.remainingPercent)}`}
           aria-hidden="true"
         >
-          {featured.remainingPercent}% 남음
+          {text(
+            language,
+            `${featured.remainingPercent}% 남음`,
+            `${featured.remainingPercent}% remaining`,
+          )}
         </span>
       </div>
       <MoreMenuButton onOpen={onOpenMenu} />
@@ -407,75 +480,129 @@ function paceSummaryLabel(
   pace: PaceWindowView | undefined,
   resetsAt: number | null,
   status: PaceDisplayStatus,
+  language: Language,
 ) {
   const exhaustionAt = pace?.projectedExhaustionAt ?? null;
   const leadDuration =
     exhaustionAt !== null && resetsAt !== null && exhaustionAt < resetsAt
-      ? formatLeadDuration(resetsAt - exhaustionAt)
+      ? formatLeadDuration(resetsAt - exhaustionAt, language)
       : null;
 
   switch (status) {
     case "safe": {
       if (exhaustionAt !== null && exhaustionAt === resetsAt) {
-        return "초기화 시 100% 사용 예상";
+        return text(
+          language,
+          "초기화 시 100% 사용 예상",
+          "Expected to reach 100% at reset",
+        );
       }
       if (
         pace?.projectedEndPercent !== null &&
         pace?.projectedEndPercent !== undefined
       ) {
-        return `초기화 시 ${Math.round(pace.projectedEndPercent)}% 사용 예상`;
+        return text(
+          language,
+          `초기화 시 ${Math.round(pace.projectedEndPercent)}% 사용 예상`,
+          `Expected usage at reset: ${Math.round(pace.projectedEndPercent)}%`,
+        );
       }
-      return "현재 페이스 유지 가능";
+      return text(
+        language,
+        "현재 페이스 유지 가능",
+        "Current pace is sustainable",
+      );
     }
     case "planExceeded": {
       const delta = Math.round(Math.abs(pace?.planDeltaPercentPoints ?? 0));
-      return `계획보다 ${delta}%p 빠름`;
+      return text(
+        language,
+        `계획보다 ${delta}%p 빠름`,
+        `${delta} pp ahead of plan`,
+      );
     }
     case "earlyRisk":
       return leadDuration === null
-        ? "초기 추정 · 소진 가능성 있음"
-        : `초기 추정 · ${leadDuration} 일찍 소진 가능`;
+        ? text(
+            language,
+            "초기 추정 · 소진 가능성 있음",
+            "Early estimate · may run out",
+          )
+        : text(
+            language,
+            `초기 추정 · ${leadDuration} 일찍 소진 가능`,
+            `Early estimate · may run out ${leadDuration} early`,
+          );
     case "exhaustionRisk":
       return leadDuration === null
-        ? "초기화 전 소진 예상"
-        : `${leadDuration} 일찍 소진`;
+        ? text(
+            language,
+            "초기화 전 소진 예상",
+            "Expected to run out before reset",
+          )
+        : text(
+            language,
+            `${leadDuration} 일찍 소진`,
+            `Runs out ${leadDuration} early`,
+          );
     default:
-      return "예측 준비 중";
+      return text(language, "예측 준비 중", "Preparing forecast");
   }
 }
 
-function forecastBasisLabel(pace: PaceWindowView | undefined) {
+function forecastBasisLabel(
+  pace: PaceWindowView | undefined,
+  language: Language,
+) {
   if (!pace || pace.forecastBasis === "unavailable") return null;
   if (pace.forecastBasis === "recent") {
-    return `최근 ${observedHoursLabel(pace)}시간`;
+    return text(
+      language,
+      `최근 ${observedHoursLabel(pace)}시간`,
+      `Last ${observedHoursLabel(pace)} hours`,
+    );
   }
-  return "누적 평균";
+  return text(language, "누적 평균", "Period average");
 }
 
-function forecastBasisDescription(pace: PaceWindowView | undefined) {
+function forecastBasisDescription(
+  pace: PaceWindowView | undefined,
+  language: Language,
+) {
   if (!pace || pace.forecastBasis === "unavailable") return null;
   if (pace.forecastBasis === "recent") {
-    return `최근 ${observedHoursLabel(pace)}시간의 평균 속도`;
+    return text(
+      language,
+      `최근 ${observedHoursLabel(pace)}시간의 평균 속도`,
+      `the average pace over the last ${observedHoursLabel(pace)} hours`,
+    );
   }
-  return "누적 평균 속도";
+  return text(language, "누적 평균 속도", "the period-average pace");
 }
 
-function formatLeadDuration(seconds: number) {
+function formatLeadDuration(seconds: number, language: Language) {
   const totalMinutes = Math.max(0, Math.ceil(seconds / 60));
   const days = Math.floor(totalMinutes / (24 * 60));
   const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
   const minutes = totalMinutes % 60;
 
   if (days > 0) {
-    if (hours > 0) return `${days}일 ${hours}시간`;
-    if (minutes > 0) return `${days}일 ${minutes}분`;
-    return `${days}일`;
+    if (hours > 0)
+      return text(language, `${days}일 ${hours}시간`, `${days}d ${hours}h`);
+    if (minutes > 0)
+      return text(language, `${days}일 ${minutes}분`, `${days}d ${minutes}m`);
+    return text(language, `${days}일`, `${days}d`);
   }
   if (hours > 0) {
-    if (minutes > 0) return `${hours}시간 ${minutes}분`;
-    return `${hours}시간`;
+    if (minutes > 0)
+      return text(
+        language,
+        `${hours}시간 ${minutes}분`,
+        `${hours}h ${minutes}m`,
+      );
+    return text(language, `${hours}시간`, `${hours}h`);
   }
-  return `${minutes}분`;
+  return text(language, `${minutes}분`, `${minutes}m`);
 }
 
 function markerAlignment(percent: number) {
@@ -486,11 +613,21 @@ function markerAlignment(percent: number) {
 
 type PlanColorStage = "reserve" | "near" | "borrow1" | "borrow2" | "borrow3";
 
-function formatPlanDifference(delta: number) {
+function formatPlanDifference(delta: number, language: Language) {
   const rounded = Math.round(Math.abs(delta));
-  if (delta > 1) return `계획보다 ${rounded}%p 초과`;
-  if (delta < -1) return `계획상 ${rounded}%p 여유`;
-  return "계획 범위";
+  if (delta > 1)
+    return text(
+      language,
+      `계획보다 ${rounded}%p 초과`,
+      `${rounded} pp over plan`,
+    );
+  if (delta < -1)
+    return text(
+      language,
+      `계획상 ${rounded}%p 여유`,
+      `${rounded} pp under plan`,
+    );
+  return text(language, "계획 범위", "On plan");
 }
 
 function planColorStage(
@@ -515,18 +652,30 @@ function planColorStage(
   return "borrow3";
 }
 
-function planColorStageLabel(stage: PlanColorStage) {
+function planColorStageLabel(stage: PlanColorStage, language: Language) {
   switch (stage) {
     case "reserve":
-      return "계획상 여유";
+      return text(language, "계획상 여유", "Plan reserve");
     case "near":
-      return "계획 범위";
+      return text(language, "계획 범위", "On plan");
     case "borrow1":
-      return "가까운 미래 계획 사용";
+      return text(
+        language,
+        "가까운 미래 계획 사용",
+        "Using the next plan segment",
+      );
     case "borrow2":
-      return "두 번째 미래 구간 사용";
+      return text(
+        language,
+        "두 번째 미래 구간 사용",
+        "Using the second future segment",
+      );
     case "borrow3":
-      return "세 번째 이상 미래 구간 사용";
+      return text(
+        language,
+        "세 번째 이상 미래 구간 사용",
+        "Using the third or later future segment",
+      );
   }
 }
 
@@ -623,8 +772,8 @@ function allocationOverrunPieces(
   return pieces;
 }
 
-function planSegmentLabel(startsAt: number) {
-  return new Intl.DateTimeFormat("ko-KR", { weekday: "short" }).format(
+function planSegmentLabel(startsAt: number, language: Language) {
+  return new Intl.DateTimeFormat(locale(language), { weekday: "short" }).format(
     new Date(startsAt * 1000),
   );
 }
@@ -638,6 +787,7 @@ function DeviationPlanGauge({
   pace: PaceWindowView | undefined;
   animateTransition: boolean;
 }) {
+  const language = useLanguage();
   const plannedPercent = pace?.plannedUsedPercent;
   const delta = pace?.planDeltaPercentPoints;
   const available =
@@ -652,25 +802,30 @@ function DeviationPlanGauge({
         className={`plan-visual ${animateTransition ? "with-transition" : ""}`}
       >
         <div className="plan-visual-heading">
-          <span>계획 대비</span>
+          <span>{text(language, "계획 대비", "Plan variance")}</span>
           <strong className="plan-visual-difference stage-near">
-            계산 불가
+            {text(language, "계산 불가", "Unavailable")}
           </strong>
         </div>
         <div className="deviation-labels" aria-hidden="true">
-          <span>여유</span>
-          <span>기준</span>
-          <span>초과</span>
+          <span>{text(language, "여유", "Under")}</span>
+          <span>{text(language, "기준", "Plan")}</span>
+          <span>{text(language, "초과", "Over")}</span>
         </div>
         <div
           className="deviation-track is-unavailable"
           role="img"
-          aria-label="권장선 계산 불가"
+          aria-label={text(
+            language,
+            "권장선 계산 불가",
+            "Plan line unavailable",
+          )}
         >
           <i className="deviation-center" aria-hidden="true" />
         </div>
         <div className="plan-visual-detail">
-          현재 {Math.round(usedPercent)}% · 계획선 —
+          {text(language, "현재", "Current")} {Math.round(usedPercent)}% ·{" "}
+          {text(language, "계획선", "plan line")} —
         </div>
       </div>
     );
@@ -689,22 +844,26 @@ function DeviationPlanGauge({
       className={`plan-visual ${animateTransition ? "with-transition" : ""}`}
     >
       <div className="plan-visual-heading">
-        <span>계획 대비</span>
+        <span>{text(language, "계획 대비", "Plan variance")}</span>
         <strong
           className={`plan-visual-difference direction-${direction} stage-${colorStage}`}
         >
-          {formatPlanDifference(delta)}
+          {formatPlanDifference(delta, language)}
         </strong>
       </div>
       <div className="deviation-labels" aria-hidden="true">
-        <span>여유</span>
-        <span>기준</span>
-        <span>초과</span>
+        <span>{text(language, "여유", "Under")}</span>
+        <span>{text(language, "기준", "Plan")}</span>
+        <span>{text(language, "초과", "Over")}</span>
       </div>
       <div
         className="deviation-track"
         role="img"
-        aria-label={`현재 사용량 ${Math.round(usedPercent)}%, 현재 시각 계획선 ${Math.round(plannedPercent)}%, ${formatPlanDifference(delta)}, ${planColorStageLabel(colorStage)}, 표시 범위 ±${PLAN_DEVIATION_RANGE}%p`}
+        aria-label={text(
+          language,
+          `현재 사용량 ${Math.round(usedPercent)}%, 현재 시각 계획선 ${Math.round(plannedPercent)}%, ${formatPlanDifference(delta, language)}, ${planColorStageLabel(colorStage, language)}, 표시 범위 ±${PLAN_DEVIATION_RANGE}%p`,
+          `Current usage ${Math.round(usedPercent)}%, current plan line ${Math.round(plannedPercent)}%, ${formatPlanDifference(delta, language)}, ${planColorStageLabel(colorStage, language)}, display range ±${PLAN_DEVIATION_RANGE} pp`,
+        )}
       >
         {stageBands.map((band, index) => (
           <span
@@ -735,7 +894,8 @@ function DeviationPlanGauge({
         />
       </div>
       <div className="plan-visual-detail">
-        현재 {Math.round(usedPercent)}% · 계획선 {Math.round(plannedPercent)}%
+        {text(language, "현재", "Current")} {Math.round(usedPercent)}% ·{" "}
+        {text(language, "계획선", "plan line")} {Math.round(plannedPercent)}%
       </div>
     </div>
   );
@@ -752,6 +912,7 @@ function WeeklyAllocationGauge({
   breakdown: PacePlanBreakdownView;
   animateTransition: boolean;
 }) {
+  const language = useLanguage();
   const plannedPercent = pace.plannedUsedPercent!;
   const delta = pace.planDeltaPercentPoints!;
   const colorStage = planColorStage(delta, plannedPercent, breakdown);
@@ -761,20 +922,22 @@ function WeeklyAllocationGauge({
     breakdown,
   );
   const currentSegment = breakdown.segments[breakdown.currentSegmentIndex];
-  const currentLabel = planSegmentLabel(currentSegment.startsAt);
+  const currentLabel = planSegmentLabel(currentSegment.startsAt, language);
 
   return (
     <div
       className={`plan-visual ${animateTransition ? "with-transition" : ""}`}
     >
       <div className="plan-visual-heading">
-        <span>주간 계획 배분</span>
+        <span>
+          {text(language, "주간 계획 배분", "Weekly plan allocation")}
+        </span>
         <strong
           className={`plan-visual-difference direction-${
             delta > 1 ? "over" : delta < -1 ? "under" : "near"
           } stage-${colorStage}`}
         >
-          {formatPlanDifference(delta)}
+          {formatPlanDifference(delta, language)}
         </strong>
       </div>
       <div className="allocation-labels" aria-hidden="true">
@@ -787,7 +950,7 @@ function WeeklyAllocationGauge({
             key={segment.startsAt}
           >
             {segment.allocationPercent > 0
-              ? planSegmentLabel(segment.startsAt)
+              ? planSegmentLabel(segment.startsAt, language)
               : null}
           </span>
         ))}
@@ -795,11 +958,11 @@ function WeeklyAllocationGauge({
       <div
         className="allocation-track"
         role="img"
-        aria-label={`요일별 계획 배분, 현재 시각 계획선 ${Math.round(
-          plannedPercent,
-        )}%, 현재 사용량 ${Math.round(usedPercent)}%, ${currentLabel} 시작 구간, ${formatPlanDifference(
-          delta,
-        )}, ${planColorStageLabel(colorStage)}`}
+        aria-label={text(
+          language,
+          `요일별 계획 배분, 현재 시각 계획선 ${Math.round(plannedPercent)}%, 현재 사용량 ${Math.round(usedPercent)}%, ${currentLabel} 시작 구간, ${formatPlanDifference(delta, language)}, ${planColorStageLabel(colorStage, language)}`,
+          `Daily plan allocation, current plan line ${Math.round(plannedPercent)}%, current usage ${Math.round(usedPercent)}%, segment starting ${currentLabel}, ${formatPlanDifference(delta, language)}, ${planColorStageLabel(colorStage, language)}`,
+        )}
       >
         {breakdown.segments.map((segment, index) => {
           const left =
@@ -850,7 +1013,12 @@ function WeeklyAllocationGauge({
         />
       </div>
       <div className="plan-visual-detail">
-        현재 {Math.round(usedPercent)}% · {currentLabel} 시작 구간까지{" "}
+        {text(language, "현재", "Current")} {Math.round(usedPercent)}% ·{" "}
+        {text(
+          language,
+          `${currentLabel} 시작 구간까지`,
+          `by the segment starting ${currentLabel}`,
+        )}{" "}
         {Math.round(plannedPercent)}%
       </div>
     </div>
@@ -927,6 +1095,7 @@ function ForecastTimeline({
   updatedAt: number | null;
   status: PaceDisplayStatus;
 }) {
+  const language = useLanguage();
   const exhaustionAt = pace?.projectedExhaustionAt ?? null;
   const hasRange =
     updatedAt !== null && resetsAt !== null && resetsAt > updatedAt;
@@ -948,40 +1117,72 @@ function ForecastTimeline({
     exhaustionAt !== null && resetsAt !== null && exhaustionAt === resetsAt
       ? 100
       : pace?.projectedEndPercent;
-  const basisDescription = forecastBasisDescription(pace);
+  const basisDescription = forecastBasisDescription(pace, language);
 
-  let accessibleDetail = "사용 기록이 더 필요합니다";
+  let accessibleDetail = text(
+    language,
+    "사용 기록이 더 필요합니다",
+    "More usage history is needed",
+  );
   if (isRisk && basisDescription !== null) {
     const consequence =
       status === "earlyRisk"
-        ? `${formatLeadDuration(resetsAt - exhaustionAt)} 일찍 소진 가능`
-        : `${formatLeadDuration(resetsAt - exhaustionAt)} 일찍 소진 예상`;
-    accessibleDetail = `${status === "earlyRisk" ? "초기 추정, " : ""}${basisDescription}를 유지하면 초기화보다 ${consequence}`;
+        ? text(
+            language,
+            `${formatLeadDuration(resetsAt - exhaustionAt, language)} 일찍 소진 가능`,
+            `may run out ${formatLeadDuration(resetsAt - exhaustionAt, language)} early`,
+          )
+        : text(
+            language,
+            `${formatLeadDuration(resetsAt - exhaustionAt, language)} 일찍 소진 예상`,
+            `expected to run out ${formatLeadDuration(resetsAt - exhaustionAt, language)} early`,
+          );
+    accessibleDetail = text(
+      language,
+      `${status === "earlyRisk" ? "초기 추정, " : ""}${basisDescription}를 유지하면 초기화보다 ${consequence}`,
+      `${status === "earlyRisk" ? "Early estimate: " : ""}maintaining ${basisDescription} means it ${consequence}`,
+    );
   } else if (
     status !== "unavailable" &&
     basisDescription !== null &&
     projectedEndPercent !== null &&
     projectedEndPercent !== undefined
   ) {
-    accessibleDetail = `${basisDescription}를 유지하면 초기화 시 ${Math.round(projectedEndPercent)}% 사용 예상`;
+    accessibleDetail = text(
+      language,
+      `${basisDescription}를 유지하면 초기화 시 ${Math.round(projectedEndPercent)}% 사용 예상`,
+      `Maintaining ${basisDescription} gives an expected ${Math.round(projectedEndPercent)}% usage at reset`,
+    );
   }
 
   const timelineLabel = isRisk
-    ? `${formatResetTime(exhaustionAt)} 소진 예상, ${formatResetTime(
-        resetsAt,
-      )} 초기화, ${accessibleDetail}`
+    ? text(
+        language,
+        `${formatResetTime(exhaustionAt, language)} 소진 예상, ${formatResetTime(resetsAt, language)} 초기화, ${accessibleDetail}`,
+        `Expected exhaustion ${formatResetTime(exhaustionAt, language)}, reset ${formatResetTime(resetsAt, language)}, ${accessibleDetail}`,
+      )
     : accessibleDetail;
 
   return (
     <div className={`forecast-timeline timeline-${status}`}>
       <div className="timeline-endpoints" aria-hidden="true">
         <span className={isRisk ? "timeline-exhaustion-label" : ""}>
-          {isRisk ? `${formatResetTime(exhaustionAt)} 소진` : null}
+          {isRisk
+            ? text(
+                language,
+                `${formatResetTime(exhaustionAt, language)} 소진`,
+                `Runs out ${formatResetTime(exhaustionAt, language)}`,
+              )
+            : null}
         </span>
         <span>
           {resetsAt === null
-            ? "초기화 시각 미정"
-            : `${formatResetTime(resetsAt)} 초기화`}
+            ? text(language, "초기화 시각 미정", "Reset time unknown")
+            : text(
+                language,
+                `${formatResetTime(resetsAt, language)} 초기화`,
+                `Resets ${formatResetTime(resetsAt, language)}`,
+              )}
         </span>
       </div>
       <div className="timeline-track" role="img" aria-label={timelineLabel}>
@@ -1009,18 +1210,29 @@ function PaceRow({
   updatedAt: number | null;
   visualization: LargePlanVisualization;
 }) {
+  const language = useLanguage();
   const usedPercent = Math.max(0, Math.min(100, window.usedPercent));
   const status = paceDisplayStatus(pace, window.resetsAt);
-  const basisLabel = forecastBasisLabel(pace);
+  const basisLabel = forecastBasisLabel(pace, language);
 
   return (
     <article className={`pace-row status-${status}`}>
       <div className="pace-heading">
-        <strong className="window-label">{windowLabel(window)}</strong>
-        <span className="pace-remaining">{window.remainingPercent}% 남음</span>
+        <strong className="window-label">
+          {windowLabel(window, language)}
+        </strong>
+        <span className="pace-remaining">
+          {text(
+            language,
+            `${window.remainingPercent}% 남음`,
+            `${window.remainingPercent}% remaining`,
+          )}
+        </span>
       </div>
       <div className="pace-summary">
-        <strong>{paceSummaryLabel(pace, window.resetsAt, status)}</strong>
+        <strong>
+          {paceSummaryLabel(pace, window.resetsAt, status, language)}
+        </strong>
         {basisLabel !== null && <i>{basisLabel}</i>}
       </div>
       <ForecastTimeline
@@ -1053,12 +1265,11 @@ function LargeOverlay({
   planVisualization: LargePlanVisualization;
   planVisualizationPending: boolean;
   planVisualizationError: string | null;
-  onPlanVisualizationChange: (
-    visualization: LargePlanVisualization,
-  ) => void;
+  onPlanVisualizationChange: (visualization: LargePlanVisualization) => void;
   recovery?: CliRecoveryActions;
   onOpenMenu: (position: OverlayMenuPosition) => void;
 }) {
+  const language = useLanguage();
   const windows = useMemo(() => sortedWindows(usage.windows), [usage.windows]);
   const paceByWindow = useMemo(
     () => new Map(pace.windows.map((window) => [window.windowId, window])),
@@ -1068,31 +1279,41 @@ function LargeOverlay({
     canUseWeeklyAllocation(paceByWindow.get(window.id)),
   );
   const currentVisualizationLabel =
-    planVisualization === "deviation" ? "계획 대비" : "주간 배분";
+    planVisualization === "deviation"
+      ? text(language, "계획 대비", "Plan variance")
+      : text(language, "주간 배분", "Weekly allocation");
   const nextVisualization: LargePlanVisualization =
     planVisualization === "deviation" ? "weeklyAllocation" : "deviation";
   const nextVisualizationAction =
-    nextVisualization === "deviation" ? "계획 대비로" : "주간 배분으로";
+    nextVisualization === "deviation"
+      ? text(language, "계획 대비로", "to plan variance")
+      : text(language, "주간 배분으로", "to weekly allocation");
   const toggleDescription = planVisualizationError
-    ? `표시 방식 저장 실패: ${planVisualizationError}`
-    : `현재 7일 계획 표시: ${currentVisualizationLabel}. 클릭하면 ${nextVisualizationAction} 전환합니다.`;
+    ? text(
+        language,
+        `표시 방식 저장 실패: ${planVisualizationError}`,
+        "Couldn't save the display mode.",
+      )
+    : text(
+        language,
+        `현재 7일 계획 표시: ${currentVisualizationLabel}. 클릭하면 ${nextVisualizationAction} 전환합니다.`,
+        `Current 7-day plan display: ${currentVisualizationLabel}. Click to switch ${nextVisualizationAction}.`,
+      );
   if (windows.length === 0) {
     return (
-      <EmptySurface
-        usage={usage}
-        recovery={recovery}
-        onOpenMenu={onOpenMenu}
-      />
+      <EmptySurface usage={usage} recovery={recovery} onOpenMenu={onOpenMenu} />
     );
   }
 
-  const compactStaleAge = staleAgeLabel(usage.lastSuccessfulAt) ?? "지연";
+  const compactStaleAge =
+    staleAgeLabel(usage.lastSuccessfulAt, undefined, language) ??
+    text(language, "지연", "Delayed");
 
   return (
     <div
       className={`pace-list ${usage.connection === "stale" ? "is-stale" : ""}`}
       role="region"
-      aria-label="Codex 페이스 예측"
+      aria-label={text(language, "Codex 페이스 예측", "Codex pace forecast")}
     >
       <header className="pace-list-header">
         <div className="pace-list-title-status">
@@ -1100,13 +1321,20 @@ function LargeOverlay({
           {usage.connection === "stale" ? (
             <span
               className="pace-freshness-status is-stale"
-              aria-label={staleLabel(usage.lastSuccessfulAt)}
+              aria-label={staleLabel(
+                usage.lastSuccessfulAt,
+                undefined,
+                language,
+              )}
             >
               <i className="pace-freshness" aria-hidden="true" />
               <small aria-hidden="true">{compactStaleAge}</small>
             </span>
           ) : (
-            <span className="pace-freshness" aria-label="최신 사용량" />
+            <span
+              className="pace-freshness"
+              aria-label={text(language, "최신 사용량", "Latest usage")}
+            />
           )}
         </div>
         <div className="pace-list-header-actions">
@@ -1144,7 +1372,11 @@ function LargeOverlay({
               className="visually-hidden"
               role="status"
             >
-              표시 방식 저장 실패: {planVisualizationError}
+              {text(
+                language,
+                `표시 방식 저장 실패: ${planVisualizationError}`,
+                "Couldn't save the display mode.",
+              )}
             </span>
           )}
         </div>
@@ -1165,6 +1397,7 @@ function LargeOverlay({
 }
 
 function App() {
+  const [language, setLanguage] = useState<Language>(DEFAULT_LANGUAGE);
   const [usage, setUsage] = useState<UsageViewState>(INITIAL_USAGE_STATE);
   const [pace, setPace] = useState<PaceViewState>(INITIAL_PACE_STATE);
   const [sizeMode, setSizeMode] = useState<OverlaySize>("middle");
@@ -1231,7 +1464,11 @@ function App() {
     const path = await open({
       multiple: false,
       directory: false,
-      title: "Codex CLI 실행 파일 선택",
+      title: text(
+        language,
+        "Codex CLI 실행 파일 선택",
+        "Choose the Codex CLI executable",
+      ),
     });
     if (typeof path !== "string") return;
     setCliActionPending(true);
@@ -1240,11 +1477,11 @@ function App() {
       await invoke<CliInfo>("set_codex_executable", { path });
       setConfiguredCliPath(path);
     } catch (error) {
-      setCliActionError(cliActionErrorMessage(error));
+      setCliActionError(cliActionErrorMessage(error, language));
     } finally {
       setCliActionPending(false);
     }
-  }, []);
+  }, [language]);
   const useAutomaticCli = useCallback(async () => {
     setCliActionPending(true);
     setCliActionError(null);
@@ -1252,11 +1489,11 @@ function App() {
       await invoke("clear_codex_executable");
       setConfiguredCliPath(null);
     } catch (error) {
-      setCliActionError(cliActionErrorMessage(error));
+      setCliActionError(cliActionErrorMessage(error, language));
     } finally {
       setCliActionPending(false);
     }
-  }, []);
+  }, [language]);
   const changePlanVisualization = useCallback(
     async (visualization: LargePlanVisualization) => {
       if (planVisualizationPendingRef.current) return;
@@ -1291,6 +1528,9 @@ function App() {
   }, []);
 
   useEffect(() => {
+    void invoke<Language>("get_language").then((value) => {
+      if (isLanguage(value)) setLanguage(value);
+    });
     void invoke<UsageViewState>("get_usage_state").then(setUsage);
     void invoke<PaceViewState>("get_pace_state").then(setPace);
     void Promise.all([
@@ -1322,13 +1562,24 @@ function App() {
       "pace://state-changed",
       (event) => setPace(event.payload),
     );
+    const unlistenLanguage = listen<Language>(
+      "ui://language-changed",
+      (event) => {
+        if (isLanguage(event.payload)) setLanguage(event.payload);
+      },
+    );
     return () => {
       void unlistenUsage.then((unlisten) => unlisten());
       void unlistenOverlaySize.then((unlisten) => unlisten());
       void unlistenOverlayAppearance.then((unlisten) => unlisten());
       void unlistenPace.then((unlisten) => unlisten());
+      void unlistenLanguage.then((unlisten) => unlisten());
     };
   }, [applyAppearanceUpdate]);
+
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
 
   useEffect(() => {
     if (!sizeReady) return;
@@ -1353,51 +1604,57 @@ function App() {
     : undefined;
 
   return (
-    <main
-      className={`overlay size-${sizeMode} ${
-        sizeReady ? "is-size-ready" : ""
-      } ${appearancePhase === "preview" ? "is-appearance-previewing" : ""}`}
-      style={
-        {
-          "--overlay-opacity": opacity / 100,
-        } as CSSProperties
-      }
-      data-tauri-drag-region
-      onPointerDown={startDragging}
-      onContextMenu={showContextMenu}
-      title="드래그하여 이동 · 우클릭 또는 더보기로 메뉴 열기"
-    >
-      {sizeMode === "small" ? (
-        <SmallOverlay
-          usage={usage}
-          featured={featured}
-          pace={featuredPace}
-          recovery={cliRecovery}
-          onOpenMenu={showMenuAt}
-        />
-      ) : sizeMode === "middle" ? (
-        <MiddleOverlay
-          usage={usage}
-          featured={featured}
-          pace={featuredPace}
-          recovery={cliRecovery}
-          onOpenMenu={showMenuAt}
-        />
-      ) : (
-        <LargeOverlay
-          usage={usage}
-          pace={pace}
-          planVisualization={largePlanVisualization}
-          planVisualizationPending={planVisualizationPending}
-          planVisualizationError={planVisualizationError}
-          onPlanVisualizationChange={(visualization) =>
-            void changePlanVisualization(visualization)
-          }
-          recovery={cliRecovery}
-          onOpenMenu={showMenuAt}
-        />
-      )}
-    </main>
+    <LanguageProvider language={language}>
+      <main
+        className={`overlay size-${sizeMode} ${
+          sizeReady ? "is-size-ready" : ""
+        } ${appearancePhase === "preview" ? "is-appearance-previewing" : ""}`}
+        style={
+          {
+            "--overlay-opacity": opacity / 100,
+          } as CSSProperties
+        }
+        data-tauri-drag-region
+        onPointerDown={startDragging}
+        onContextMenu={showContextMenu}
+        title={text(
+          language,
+          "드래그하여 이동 · 우클릭 또는 더보기로 메뉴 열기",
+          "Drag to move · right-click or use More to open the menu",
+        )}
+      >
+        {sizeMode === "small" ? (
+          <SmallOverlay
+            usage={usage}
+            featured={featured}
+            pace={featuredPace}
+            recovery={cliRecovery}
+            onOpenMenu={showMenuAt}
+          />
+        ) : sizeMode === "middle" ? (
+          <MiddleOverlay
+            usage={usage}
+            featured={featured}
+            pace={featuredPace}
+            recovery={cliRecovery}
+            onOpenMenu={showMenuAt}
+          />
+        ) : (
+          <LargeOverlay
+            usage={usage}
+            pace={pace}
+            planVisualization={largePlanVisualization}
+            planVisualizationPending={planVisualizationPending}
+            planVisualizationError={planVisualizationError}
+            onPlanVisualizationChange={(visualization) =>
+              void changePlanVisualization(visualization)
+            }
+            recovery={cliRecovery}
+            onOpenMenu={showMenuAt}
+          />
+        )}
+      </main>
+    </LanguageProvider>
   );
 }
 

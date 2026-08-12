@@ -35,6 +35,7 @@ const savedSettings: EditableSettings = {
     osNotificationsEnabled: false,
   },
   overlayOpacity: 100,
+  language: "ko",
 };
 
 async function renderLoadedSettings() {
@@ -414,5 +415,74 @@ describe("설정 창", () => {
     fireEvent.click(screen.getByRole("button", { name: "설정 닫기" }));
     await waitFor(() => expect(mocks.hide).toHaveBeenCalled());
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  it("영어를 선택해 설정 화면을 전환하고 언어 값을 저장한다", async () => {
+    await renderLoadedSettings();
+
+    fireEvent.change(screen.getByLabelText("표시 언어"), {
+      target: { value: "en" },
+    });
+
+    expect(mocks.invoke).toHaveBeenCalledWith("preview_language", {
+      sessionId: 1,
+      revision: 1,
+      language: "en",
+    });
+
+    expect(
+      screen.getByRole("heading", { name: "Settings" }),
+    ).toBeInTheDocument();
+    const weeklyPlanHeading = screen
+      .getByText("Weekly usage plan")
+      .closest(".weekly-plan-heading");
+    const weeklyPlanHelp = screen.getByText(/allocation is normalized to 100%/);
+    expect(weeklyPlanHeading).toContainElement(weeklyPlanHelp);
+    expect(getComputedStyle(weeklyPlanHeading as HTMLElement).display).toBe(
+      "grid",
+    );
+    expect(getComputedStyle(weeklyPlanHelp).gridColumn).toBe("1 / -1");
+    const weekdayBoundaryHelp = screen.getByText(
+      /Each day is a 24-hour segment/,
+    );
+    expect(getComputedStyle(weekdayBoundaryHelp).margin).toBe("0px");
+    expect(getComputedStyle(weekdayBoundaryHelp).paddingTop).toBe("20px");
+    expect(screen.getByLabelText("Display language")).toHaveValue("en");
+    expect(
+      screen.getAllByRole("slider", { name: /relative usage intensity$/ }),
+    ).toHaveLength(7);
+    for (const label of ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+
+    fireEvent.change(screen.getByLabelText("Display language"), {
+      target: { value: "ko" },
+    });
+    expect(mocks.invoke).toHaveBeenCalledWith("preview_language", {
+      sessionId: 1,
+      revision: 2,
+      language: "ko",
+    });
+    expect(
+      screen.getAllByRole("slider", { name: /요일 상대 사용 강도$/ }),
+    ).toHaveLength(7);
+
+    fireEvent.change(screen.getByLabelText("표시 언어"), {
+      target: { value: "en" },
+    });
+    expect(mocks.invoke).toHaveBeenCalledWith("preview_language", {
+      sessionId: 1,
+      revision: 3,
+      language: "en",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith("save_editable_settings", {
+        sessionId: 1,
+        settings: expect.objectContaining({ language: "en" }),
+      }),
+    );
+    expect(document.documentElement).toHaveAttribute("lang", "en");
   });
 });
