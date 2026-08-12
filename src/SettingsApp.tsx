@@ -54,6 +54,14 @@ const DEFAULT_EDITABLE_SETTINGS: EditableSettings = {
   overlayOpacity: DEFAULT_OVERLAY_OPACITY,
   language: DEFAULT_LANGUAGE,
 };
+const LANGUAGE_LISTBOX_ID = "display-language-listbox";
+const LANGUAGE_OPTIONS: ReadonlyArray<{
+  value: EditableSettings["language"];
+  label: string;
+}> = [
+  { value: "ko", label: "한국어" },
+  { value: "en", label: "English" },
+];
 
 type PermissionStatus = "checking" | "granted" | "denied";
 
@@ -131,6 +139,8 @@ function SettingsApp() {
   const [clearingHistory, setClearingHistory] = useState(false);
   const [closeDialogOpen, setCloseDialogOpen] = useState(false);
   const [pendingClose, setPendingClose] = useState(false);
+  const [languageListboxOpen, setLanguageListboxOpen] = useState(false);
+  const [activeLanguageIndex, setActiveLanguageIndex] = useState(0);
   const [opacityTooltipVisible, setOpacityTooltipVisible] = useState(false);
   const [weightMessage, setWeightMessage] = useState(
     "막대를 움직여 주간 사용 패턴을 만들어보세요.",
@@ -143,6 +153,8 @@ function SettingsApp() {
   const previewFrameRef = useRef<number | null>(null);
   const pendingOpacityRef = useRef(DEFAULT_OVERLAY_OPACITY);
   const requestCloseRef = useRef<() => void>(() => undefined);
+  const languageListboxRef = useRef<HTMLDivElement | null>(null);
+  const languageTriggerRef = useRef<HTMLButtonElement | null>(null);
   const opacityTooltipTimerRef = useRef<number | null>(null);
   const opacityPointerActiveRef = useRef(false);
 
@@ -165,6 +177,11 @@ function SettingsApp() {
   )?.[0];
   const dirty = !settingsEqual(persistedSettings, draftSettings);
   const formBusy = saving || requestingPermission;
+  const selectedLanguageIndex = Math.max(
+    0,
+    LANGUAGE_OPTIONS.findIndex((option) => option.value === language),
+  );
+  const selectedLanguageOption = LANGUAGE_OPTIONS[selectedLanguageIndex];
   const opacityTooltipPosition =
     ((opacity - MIN_OVERLAY_OPACITY) / (100 - MIN_OVERLAY_OPACITY)) * 100;
   const opacityTooltipOffset = 8 - opacityTooltipPosition * 0.16;
@@ -227,6 +244,15 @@ function SettingsApp() {
       setPersistedSettings(session.settings);
       setDraftSettings(recoveredSettings);
       setCloseDialogOpen(false);
+      setLanguageListboxOpen(false);
+      setActiveLanguageIndex(
+        Math.max(
+          0,
+          LANGUAGE_OPTIONS.findIndex(
+            (option) => option.value === recoveredSettings.language,
+          ),
+        ),
+      );
       setWeightMessage(
         recovered
           ? text(
@@ -318,6 +344,35 @@ function SettingsApp() {
     });
   };
 
+  const openLanguageListbox = () => {
+    if (formBusy) return;
+    setActiveLanguageIndex(selectedLanguageIndex);
+    setLanguageListboxOpen(true);
+  };
+
+  const closeLanguageListbox = () => {
+    setLanguageListboxOpen(false);
+  };
+
+  const selectLanguage = (nextLanguage: EditableSettings["language"]) => {
+    closeLanguageListbox();
+    languageTriggerRef.current?.focus();
+    if (nextLanguage === language) return;
+    setDraftSettings((current) => ({
+      ...current,
+      language: nextLanguage,
+    }));
+    previewLanguage(nextLanguage);
+    setWeightMessage(
+      text(
+        nextLanguage,
+        "막대를 움직여 주간 사용 패턴을 만들어보세요.",
+        "Move the bars to shape your weekly usage pattern.",
+      ),
+    );
+    setMessage("");
+  };
+
   const cancelSessionAndHide = useCallback(async () => {
     cancelScheduledPreview();
     hideOpacityTooltip();
@@ -382,6 +437,20 @@ function SettingsApp() {
   }, [language]);
 
   useEffect(() => {
+    if (!languageListboxOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !languageListboxRef.current?.contains(event.target)
+      ) {
+        closeLanguageListbox();
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [languageListboxOpen]);
+
+  useEffect(() => {
     const unlistenClose = listen("ui://settings-close-requested", () =>
       requestCloseRef.current(),
     );
@@ -394,7 +463,9 @@ function SettingsApp() {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      if (closeDialogOpen) {
+      if (languageListboxOpen) {
+        closeLanguageListbox();
+      } else if (closeDialogOpen) {
         setCloseDialogOpen(false);
       } else {
         requestClose();
@@ -402,7 +473,7 @@ function SettingsApp() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [closeDialogOpen, requestClose]);
+  }, [closeDialogOpen, languageListboxOpen, requestClose]);
 
   useEffect(() => {
     if (!pendingClose || formBusy) return;
@@ -601,7 +672,7 @@ function SettingsApp() {
         </button>
       </header>
 
-      <div className="settings-content">
+      <div className="settings-content" onScroll={closeLanguageListbox}>
         <section>
           <div className="setting-row language-setting">
             <div>
@@ -614,30 +685,116 @@ function SettingsApp() {
                 )}
               </p>
             </div>
-            <select
-              aria-label={text(language, "표시 언어", "Display language")}
-              value={language}
-              disabled={formBusy}
-              onChange={(event) => {
-                const nextLanguage = event.target.value === "en" ? "en" : "ko";
-                setDraftSettings((current) => ({
-                  ...current,
-                  language: nextLanguage,
-                }));
-                previewLanguage(nextLanguage);
-                setWeightMessage(
-                  text(
-                    nextLanguage,
-                    "막대를 움직여 주간 사용 패턴을 만들어보세요.",
-                    "Move the bars to shape your weekly usage pattern.",
-                  ),
-                );
-                setMessage("");
-              }}
-            >
-              <option value="ko">한국어</option>
-              <option value="en">English</option>
-            </select>
+            <div className="language-listbox" ref={languageListboxRef}>
+              <button
+                ref={languageTriggerRef}
+                className="language-listbox-trigger"
+                type="button"
+                role="combobox"
+                aria-label={text(language, "표시 언어", "Display language")}
+                aria-haspopup="listbox"
+                aria-expanded={languageListboxOpen}
+                aria-controls={LANGUAGE_LISTBOX_ID}
+                aria-activedescendant={
+                  languageListboxOpen
+                    ? `display-language-option-${LANGUAGE_OPTIONS[activeLanguageIndex].value}`
+                    : undefined
+                }
+                disabled={formBusy}
+                onClick={() => {
+                  if (languageListboxOpen) {
+                    closeLanguageListbox();
+                  } else {
+                    openLanguageListbox();
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Tab") {
+                    closeLanguageListbox();
+                    return;
+                  }
+                  if (event.key === "Escape" && languageListboxOpen) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeLanguageListbox();
+                    return;
+                  }
+                  if (
+                    !languageListboxOpen &&
+                    ["Enter", " ", "ArrowDown", "ArrowUp"].includes(event.key)
+                  ) {
+                    event.preventDefault();
+                    openLanguageListbox();
+                    return;
+                  }
+                  if (!languageListboxOpen) return;
+                  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    const direction = event.key === "ArrowDown" ? 1 : -1;
+                    setActiveLanguageIndex((current) =>
+                      Math.min(
+                        LANGUAGE_OPTIONS.length - 1,
+                        Math.max(0, current + direction),
+                      ),
+                    );
+                    return;
+                  }
+                  if (event.key === "Home" || event.key === "End") {
+                    event.preventDefault();
+                    setActiveLanguageIndex(
+                      event.key === "Home" ? 0 : LANGUAGE_OPTIONS.length - 1,
+                    );
+                    return;
+                  }
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    selectLanguage(LANGUAGE_OPTIONS[activeLanguageIndex].value);
+                  }
+                }}
+              >
+                <span>{selectedLanguageOption.label}</span>
+                <svg viewBox="0 0 12 8" aria-hidden="true">
+                  <path d="M1 1.5 6 6.5 11 1.5" />
+                </svg>
+              </button>
+              {languageListboxOpen && (
+                <div
+                  className="language-listbox-options"
+                  id={LANGUAGE_LISTBOX_ID}
+                  role="listbox"
+                  aria-label={text(
+                    language,
+                    "표시 언어 선택",
+                    "Select display language",
+                  )}
+                >
+                  {LANGUAGE_OPTIONS.map((option, index) => (
+                    <button
+                      className={`language-listbox-option ${
+                        index === activeLanguageIndex ? "is-active" : ""
+                      }`}
+                      id={`display-language-option-${option.value}`}
+                      key={option.value}
+                      type="button"
+                      role="option"
+                      tabIndex={-1}
+                      aria-selected={option.value === language}
+                      onPointerDown={(event) => event.preventDefault()}
+                      onPointerMove={() => setActiveLanguageIndex(index)}
+                      onClick={() => selectLanguage(option.value)}
+                    >
+                      <span>{option.label}</span>
+                      <span
+                        className="language-listbox-check"
+                        aria-hidden="true"
+                      >
+                        {option.value === language ? "✓" : ""}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </section>
 
@@ -757,6 +914,11 @@ function SettingsApp() {
                         )}
                         disabled={formBusy}
                         value={weight}
+                        style={
+                          {
+                            "--range-progress": `${weight * 10}%`,
+                          } as CSSProperties
+                        }
                         onChange={(event) =>
                           setWeekdayWeight(index, Number(event.target.value))
                         }
@@ -819,6 +981,11 @@ function SettingsApp() {
               )}
               disabled={formBusy || sessionId === null}
               value={opacity}
+              style={
+                {
+                  "--range-progress": `${opacityTooltipPosition}%`,
+                } as CSSProperties
+              }
               onPointerDown={() => {
                 opacityPointerActiveRef.current = true;
                 showOpacityTooltip(false);

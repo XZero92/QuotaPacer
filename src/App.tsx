@@ -152,7 +152,6 @@ function MoreMenuButton({
       className="more-menu-button"
       aria-label={text(language, "더보기 메뉴", "More menu")}
       aria-haspopup="menu"
-      title={text(language, "더보기 메뉴", "More menu")}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => {
         const bounds = event.currentTarget.getBoundingClientRect();
@@ -1349,7 +1348,6 @@ function LargeOverlay({
                 planVisualizationError ? "large-plan-toggle-error" : undefined
               }
               aria-label={toggleDescription}
-              title={toggleDescription}
               disabled={planVisualizationPending}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={() => onPlanVisualizationChange(nextVisualization)}
@@ -1617,11 +1615,6 @@ function App() {
         data-tauri-drag-region
         onPointerDown={startDragging}
         onContextMenu={showContextMenu}
-        title={text(
-          language,
-          "드래그하여 이동 · 우클릭 또는 더보기로 메뉴 열기",
-          "Drag to move · right-click or use More to open the menu",
-        )}
       >
         {sizeMode === "small" ? (
           <SmallOverlay

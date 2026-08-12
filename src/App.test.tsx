@@ -579,6 +579,7 @@ describe("Codex 사용량 오버레이", () => {
     const toggle = await screen.findByRole("button", {
       name: /현재 7일 계획 표시: 계획 대비.*주간 배분.*전환/,
     });
+    expect(toggle).not.toHaveAttribute("title");
     expect(toggle.querySelector(".large-plan-toggle-switch")).toHaveTextContent(
       "⇄",
     );
@@ -906,10 +907,10 @@ describe("Codex 사용량 오버레이", () => {
   });
 
   it("우클릭하면 네이티브 오버레이 메뉴를 요청한다", async () => {
-    render(<App />);
-    const overlay = await screen.findByTitle(
-      "드래그하여 이동 · 우클릭 또는 더보기로 메뉴 열기",
-    );
+    const { container } = render(<App />);
+    await screen.findByRole("button", { name: "더보기 메뉴" });
+    const overlay = container.querySelector(".overlay") as HTMLElement;
+    expect(overlay).not.toHaveAttribute("title");
 
     fireEvent.contextMenu(overlay);
 
@@ -919,6 +920,7 @@ describe("Codex 사용량 오버레이", () => {
   it("더보기 버튼은 드래그하지 않고 버튼 아래에 네이티브 메뉴를 연다", async () => {
     render(<App />);
     const button = await screen.findByRole("button", { name: "더보기 메뉴" });
+    expect(button).not.toHaveAttribute("title");
     vi.spyOn(button, "getBoundingClientRect").mockReturnValue({
       x: 244,
       y: 6,
@@ -967,10 +969,9 @@ describe("Codex 사용량 오버레이", () => {
         });
       return Promise.resolve();
     });
-    render(<App />);
-    const overlay = await screen.findByTitle(
-      "드래그하여 이동 · 우클릭 또는 더보기로 메뉴 열기",
-    );
+    const { container } = render(<App />);
+    await screen.findByRole("button", { name: "더보기 메뉴" });
+    const overlay = container.querySelector(".overlay") as HTMLElement;
 
     expect(overlay).toHaveStyle({ "--overlay-opacity": "0.65" });
     expect(screen.getAllByText("계획 대비")).toHaveLength(2);

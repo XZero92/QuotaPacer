@@ -7,23 +7,101 @@ html.settings-view #root {
 }
 
 button,
-input,
-select {
+input {
   font: inherit;
 }
 
-.language-setting select {
-  min-width: 128px;
-  padding: 8px 34px 8px 10px;
+.language-listbox {
+  position: relative;
+  z-index: 4;
+  flex: 0 0 auto;
+}
+
+.language-listbox-trigger {
+  display: flex;
+  width: 142px;
+  min-height: 36px;
+  padding: 0 10px 0 12px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   color: #f3f5f7;
+  cursor: pointer;
   background: #20242b;
   border: 1px solid #3a404a;
   border-radius: 8px;
 }
 
-.language-setting select:focus-visible {
-  outline: 2px solid #72e6ad;
-  outline-offset: 2px;
+.language-listbox-trigger:hover:not(:disabled),
+.language-listbox-trigger[aria-expanded="true"] {
+  background: #292e36;
+  border-color: #56616e;
+}
+
+.language-listbox-trigger svg {
+  width: 12px;
+  height: 8px;
+  overflow: visible;
+  fill: none;
+  stroke: #9ca5b0;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.75px;
+  transition: transform 120ms ease;
+}
+
+.language-listbox-trigger[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.language-listbox-options {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  width: 164px;
+  padding: 5px;
+  gap: 2px;
+  background: #1a1e24;
+  border: 1px solid #3f4651;
+  border-radius: 10px;
+  box-shadow: 0 14px 34px rgb(0 0 0 / 44%);
+}
+
+.language-listbox-option {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 9px;
+  align-items: center;
+  justify-content: space-between;
+  color: #c7cdd5;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+}
+
+.language-listbox-option.is-active {
+  color: #eefbf4;
+  background: rgb(76 174 125 / 18%);
+}
+
+.language-listbox-option[aria-selected="true"] {
+  color: #b8f5d4;
+  font-weight: 700;
+}
+
+.language-listbox-check {
+  width: 16px;
+  color: #72e6ad;
+  text-align: center;
+}
+
+.language-listbox-trigger:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .settings-page {
@@ -85,8 +163,32 @@ select {
 
 .settings-content {
   min-height: 0;
+  padding-right: 4px;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-color: #46515d transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.settings-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.settings-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.settings-content::-webkit-scrollbar-thumb {
+  background: #46515d;
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+}
+
+.settings-content::-webkit-scrollbar-thumb:hover {
+  background: #4cae7d;
+  background-clip: padding-box;
 }
 
 .settings-content > section {
@@ -280,13 +382,90 @@ select {
 .weekday-weight input {
   position: relative;
   z-index: 1;
+  appearance: none;
   width: 30px;
   height: 158px;
   margin: 0;
-  accent-color: #72e6ad;
+  -webkit-appearance: none;
+  background: transparent;
   cursor: pointer;
   direction: rtl;
   writing-mode: vertical-lr;
+}
+
+.weekday-weight input::-webkit-slider-runnable-track {
+  width: 6px;
+  height: 100%;
+  background: linear-gradient(
+    to top,
+    #4cae7d 0 var(--range-progress),
+    #30363f var(--range-progress) 100%
+  );
+  border: 1px solid rgb(255 255 255 / 7%);
+  border-radius: 999px;
+}
+
+.weekday-weight input::-webkit-slider-thumb {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-left: -7px;
+  -webkit-appearance: none;
+  background: #d9f8e8;
+  border: 3px solid #4cae7d;
+  border-radius: 50%;
+  box-shadow: 0 2px 7px rgb(0 0 0 / 42%);
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.weekday-weight input::-moz-range-track {
+  width: 6px;
+  background: #30363f;
+  border: 1px solid rgb(255 255 255 / 7%);
+  border-radius: 999px;
+}
+
+.weekday-weight input::-moz-range-progress {
+  width: 6px;
+  background: #4cae7d;
+  border-radius: 999px;
+}
+
+.weekday-weight input::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: #d9f8e8;
+  border: 3px solid #4cae7d;
+  border-radius: 50%;
+  box-shadow: 0 2px 7px rgb(0 0 0 / 42%);
+}
+
+.weekday-weight input:hover:not(:disabled)::-webkit-slider-thumb,
+.weekday-weight input:active:not(:disabled)::-webkit-slider-thumb {
+  background: #f0fff7;
+  border-color: #72e6ad;
+  box-shadow: 0 2px 9px rgb(0 0 0 / 48%);
+}
+
+.weekday-weight input:focus-visible {
+  outline: none;
+}
+
+.weekday-weight input:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 2px #191c22,
+    0 0 0 4px #72e6ad,
+    0 2px 9px rgb(0 0 0 / 48%);
+}
+
+.weekday-weight input:focus-visible::-moz-range-thumb {
+  box-shadow:
+    0 0 0 2px #191c22,
+    0 0 0 4px #72e6ad,
+    0 2px 9px rgb(0 0 0 / 48%);
 }
 
 .weekday-weight input:disabled {
@@ -334,10 +513,87 @@ select {
 }
 
 .opacity-slider {
+  appearance: none;
   width: 100%;
+  height: 22px;
   margin: 0;
-  accent-color: #72e6ad;
+  -webkit-appearance: none;
+  background: transparent;
   cursor: pointer;
+}
+
+.opacity-slider::-webkit-slider-runnable-track {
+  height: 6px;
+  background: linear-gradient(
+    to right,
+    #4cae7d 0 var(--range-progress),
+    #30363f var(--range-progress) 100%
+  );
+  border: 1px solid rgb(255 255 255 / 7%);
+  border-radius: 999px;
+}
+
+.opacity-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -7px;
+  -webkit-appearance: none;
+  background: #d9f8e8;
+  border: 3px solid #4cae7d;
+  border-radius: 50%;
+  box-shadow: 0 2px 7px rgb(0 0 0 / 42%);
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.opacity-slider::-moz-range-track {
+  height: 6px;
+  background: #30363f;
+  border: 1px solid rgb(255 255 255 / 7%);
+  border-radius: 999px;
+}
+
+.opacity-slider::-moz-range-progress {
+  height: 6px;
+  background: #4cae7d;
+  border-radius: 999px;
+}
+
+.opacity-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: #d9f8e8;
+  border: 3px solid #4cae7d;
+  border-radius: 50%;
+  box-shadow: 0 2px 7px rgb(0 0 0 / 42%);
+}
+
+.opacity-slider:hover:not(:disabled)::-webkit-slider-thumb,
+.opacity-slider:active:not(:disabled)::-webkit-slider-thumb {
+  background: #f0fff7;
+  border-color: #72e6ad;
+  box-shadow: 0 2px 9px rgb(0 0 0 / 48%);
+}
+
+.opacity-slider:focus-visible {
+  outline: none;
+}
+
+.opacity-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 2px #111318,
+    0 0 0 4px #72e6ad,
+    0 2px 9px rgb(0 0 0 / 48%);
+}
+
+.opacity-slider:focus-visible::-moz-range-thumb {
+  box-shadow:
+    0 0 0 2px #111318,
+    0 0 0 4px #72e6ad,
+    0 2px 9px rgb(0 0 0 / 48%);
 }
 
 .opacity-slider:disabled {
@@ -440,6 +696,10 @@ select {
   opacity: 0.55;
 }
 
+.switch input:disabled {
+  cursor: default;
+}
+
 .icon-button {
   width: 34px;
   height: 34px;
@@ -452,6 +712,11 @@ select {
 .icon-button:hover,
 .secondary-button:hover {
   background: rgb(255 255 255 / 8%);
+}
+
+.icon-button:active,
+.secondary-button:active {
+  background: rgb(255 255 255 / 13%);
 }
 
 .secondary-button,
@@ -477,6 +742,42 @@ select {
 .danger-button {
   color: #ff9da2;
   background: rgb(255 107 114 / 10%);
+}
+
+.primary-button:hover:not(:disabled) {
+  background: #8aefbc;
+}
+
+.primary-button:active:not(:disabled) {
+  background: #5fd79a;
+}
+
+.danger-button:hover:not(:disabled) {
+  background: rgb(255 107 114 / 16%);
+}
+
+.danger-button:active:not(:disabled) {
+  background: rgb(255 107 114 / 22%);
+}
+
+.weekday-presets button:hover:not(:disabled) {
+  color: #d5dbe2;
+  background: #292e36;
+  border-color: #505966;
+}
+
+.weekday-presets button:active:not(:disabled) {
+  background: #181b20;
+}
+
+.language-listbox-trigger:focus-visible,
+.icon-button:focus-visible,
+.secondary-button:focus-visible,
+.primary-button:focus-visible,
+.danger-button:focus-visible,
+.weekday-presets button:focus-visible {
+  outline: 2px solid #72e6ad;
+  outline-offset: 2px;
 }
 
 .primary-button:disabled,
@@ -532,4 +833,14 @@ select {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+@media (forced-colors: active) {
+  .weekday-weight input,
+  .opacity-slider {
+    appearance: auto;
+    -webkit-appearance: auto;
+    background: initial;
+    forced-color-adjust: auto;
+  }
 }

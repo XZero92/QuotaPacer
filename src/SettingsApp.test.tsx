@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EditableSettings } from "./types";
 import SettingsApp, { normalizeWeekdayWeights } from "./SettingsApp";
@@ -157,6 +163,23 @@ describe("설정 창", () => {
     expect(
       screen.getByText(/막대는 자동으로 움직이지 않습니다/),
     ).toBeInTheDocument();
+  });
+
+  it("요일 강도와 투명도 슬라이더에 현재 값의 채움 비율을 제공한다", async () => {
+    const opacitySlider = await renderLoadedSettings();
+    const weekdaySlider = screen.getByLabelText("월요일 상대 사용 강도");
+
+    expect(weekdaySlider).toHaveStyle({ "--range-progress": "50%" });
+    fireEvent.change(weekdaySlider, { target: { value: "10" } });
+    expect(weekdaySlider).toHaveStyle({ "--range-progress": "100%" });
+    fireEvent.change(weekdaySlider, { target: { value: "0" } });
+    expect(weekdaySlider).toHaveStyle({ "--range-progress": "0%" });
+
+    expect(opacitySlider).toHaveStyle({ "--range-progress": "100%" });
+    fireEvent.change(opacitySlider, { target: { value: "70" } });
+    expect(opacitySlider).toHaveStyle({ "--range-progress": "50%" });
+    fireEvent.change(opacitySlider, { target: { value: "40" } });
+    expect(opacitySlider).toHaveStyle({ "--range-progress": "0%" });
   });
 
   it("프리셋으로 평일 중심과 주말 중심 강도를 적용한다", async () => {
@@ -420,9 +443,18 @@ describe("설정 창", () => {
   it("영어를 선택해 설정 화면을 전환하고 언어 값을 저장한다", async () => {
     await renderLoadedSettings();
 
-    fireEvent.change(screen.getByLabelText("표시 언어"), {
-      target: { value: "en" },
+    const koreanCombobox = screen.getByRole("combobox", {
+      name: "표시 언어",
     });
+    expect(koreanCombobox).toHaveTextContent("한국어");
+    expect(koreanCombobox).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(koreanCombobox);
+    const listbox = screen.getByRole("listbox", { name: "표시 언어 선택" });
+    expect(within(listbox).getAllByRole("option")).toHaveLength(2);
+    expect(
+      within(listbox).getByRole("option", { name: "한국어" }),
+    ).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(within(listbox).getByRole("option", { name: "English" }));
 
     expect(mocks.invoke).toHaveBeenCalledWith("preview_language", {
       sessionId: 1,
@@ -447,7 +479,9 @@ describe("설정 창", () => {
     );
     expect(getComputedStyle(weekdayBoundaryHelp).margin).toBe("0px");
     expect(getComputedStyle(weekdayBoundaryHelp).paddingTop).toBe("20px");
-    expect(screen.getByLabelText("Display language")).toHaveValue("en");
+    expect(
+      screen.getByRole("combobox", { name: "Display language" }),
+    ).toHaveTextContent("English");
     expect(
       screen.getAllByRole("slider", { name: /relative usage intensity$/ }),
     ).toHaveLength(7);
@@ -455,9 +489,8 @@ describe("설정 창", () => {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
 
-    fireEvent.change(screen.getByLabelText("Display language"), {
-      target: { value: "ko" },
-    });
+    fireEvent.click(screen.getByRole("combobox", { name: "Display language" }));
+    fireEvent.click(screen.getByRole("option", { name: "한국어" }));
     expect(mocks.invoke).toHaveBeenCalledWith("preview_language", {
       sessionId: 1,
       revision: 2,
@@ -467,9 +500,8 @@ describe("설정 창", () => {
       screen.getAllByRole("slider", { name: /요일 상대 사용 강도$/ }),
     ).toHaveLength(7);
 
-    fireEvent.change(screen.getByLabelText("표시 언어"), {
-      target: { value: "en" },
-    });
+    fireEvent.click(screen.getByRole("combobox", { name: "표시 언어" }));
+    fireEvent.click(screen.getByRole("option", { name: "English" }));
     expect(mocks.invoke).toHaveBeenCalledWith("preview_language", {
       sessionId: 1,
       revision: 3,
@@ -484,5 +516,54 @@ describe("설정 창", () => {
       }),
     );
     expect(document.documentElement).toHaveAttribute("lang", "en");
+  });
+
+  it("언어 listbox를 키보드로 탐색하고 선택 없이 닫는다", async () => {
+    await renderLoadedSettings();
+    const combobox = screen.getByRole("combobox", { name: "표시 언어" });
+
+    fireEvent.keyDown(combobox, { key: "ArrowDown" });
+    expect(combobox).toHaveAttribute("aria-expanded", "true");
+    expect(combobox).toHaveAttribute(
+      "aria-activedescendant",
+      "display-language-option-ko",
+    );
+    fireEvent.keyDown(combobox, { key: "End" });
+    expect(combobox).toHaveAttribute(
+      "aria-activedescendant",
+      "display-language-option-en",
+    );
+    fireEvent.keyDown(combobox, { key: "Home" });
+    fireEvent.keyDown(combobox, { key: "ArrowDown" });
+    fireEvent.keyDown(combobox, { key: "Enter" });
+
+    expect(mocks.invoke).toHaveBeenCalledWith("preview_language", {
+      sessionId: 1,
+      revision: 1,
+      language: "en",
+    });
+    const englishCombobox = screen.getByRole("combobox", {
+      name: "Display language",
+    });
+    expect(englishCombobox).toHaveTextContent("English");
+
+    fireEvent.keyDown(englishCombobox, { key: " " });
+    fireEvent.keyDown(englishCombobox, { key: "Home" });
+    fireEvent.keyDown(englishCombobox, { key: "Escape" });
+    expect(englishCombobox).toHaveAttribute("aria-expanded", "false");
+    expect(englishCombobox).toHaveTextContent("English");
+    expect(mocks.hide).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(englishCombobox, { key: "Enter" });
+    fireEvent.keyDown(englishCombobox, { key: "Tab" });
+    expect(englishCombobox).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.keyDown(englishCombobox, { key: "ArrowUp" });
+    fireEvent.pointerDown(document.body);
+    expect(englishCombobox).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.keyDown(englishCombobox, { key: "ArrowDown" });
+    fireEvent.scroll(document.querySelector(".settings-content") as Element);
+    expect(englishCombobox).toHaveAttribute("aria-expanded", "false");
   });
 });
