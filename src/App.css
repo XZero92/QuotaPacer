@@ -287,6 +287,12 @@ body,
   min-width: 0;
 }
 
+.middle-heading .window-label > span:last-child {
+  color: var(--color-secondary-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .middle-footer {
   display: flex;
   min-width: 0;
