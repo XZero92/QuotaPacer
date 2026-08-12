@@ -2,7 +2,7 @@
 
 [한국어](README.md) | [English](README_EN.md)
 
-QuotaPacer is an unofficial cross-platform desktop app that displays the remaining usage reported for the current account by Codex CLI in a compact overlay. It targets Windows, macOS, and Linux. The current MVP focuses on usage visibility and manual refresh.
+QuotaPacer is an unofficial cross-platform desktop app that displays the remaining usage reported for the current account by Codex CLI in a compact overlay. It targets Windows, macOS, and Linux. The current MVP focuses on usage visibility, pace forecasts and warnings, and automatic and manual refresh.
 
 > This project is not an official OpenAI product. It does not read Codex credentials or tokens directly. It only uses the app-server interface of a Codex CLI installation that the user has installed and signed in to.
 
@@ -33,12 +33,12 @@ The current scope does not include automatic startup, character animation, long-
 
 ## Requirements
 
-- Node.js 20 or later and npm
+- Node.js 22.13 or later and npm
 - Rust stable 1.77.2 or later
 - Codex CLI 0.144.6 or later recommended
-- Codex CLI signed in with a ChatGPT account
+- Codex CLI signed in with an authentication method that supports account usage lookup (ChatGPT sign-in recommended)
 
-If Codex CLI is missing or not signed in, install it and complete sign-in first.
+If Codex CLI is missing, follow the [official Codex CLI guide](https://developers.openai.com/codex/cli) to install it. Then sign in with ChatGPT or another authentication method that supports account usage lookup. API-key and Amazon Bedrock authentication are not supported.
 
 ```sh
 codex --version
@@ -78,6 +78,8 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib connects_to_installed_code
 
 ```text
 src/                  React overlay UI, display rules, and frontend tests
+src-tauri/src/lib.rs
+                      Tauri initialization, windows, tray, menus, and frontend commands
 src-tauri/src/codex.rs
                       CLI discovery, JSONL app-server client, and reconnection
 src-tauri/src/usage.rs

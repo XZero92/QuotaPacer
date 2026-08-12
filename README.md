@@ -2,7 +2,7 @@
 
 [한국어](README.md) | [English](README_EN.md)
 
-QuotaPacer는 Codex CLI가 보고하는 현재 계정의 남은 사용량을 작은 데스크톱 오버레이로 보여주는 비공식 크로스 플랫폼 앱입니다. Windows, macOS, Linux를 대상으로 하며, 현재 MVP는 사용량 표시와 수동 새로고침에 집중합니다.
+QuotaPacer는 Codex CLI가 보고하는 현재 계정의 남은 사용량을 작은 데스크톱 오버레이로 보여주는 비공식 크로스 플랫폼 앱입니다. Windows, macOS, Linux를 대상으로 하며, 현재 MVP는 사용량 표시와 페이스 예측·경고, 자동·수동 새로고침에 집중합니다.
 
 > 이 프로젝트는 OpenAI의 공식 제품이 아닙니다. Codex 인증 정보나 토큰을 직접 읽지 않고, 사용자가 설치하고 로그인한 Codex CLI의 app-server 인터페이스만 사용합니다.
 
@@ -32,12 +32,12 @@ QuotaPacer는 Codex CLI가 보고하는 현재 계정의 남은 사용량을 작
 
 ## 요구 사항
 
-- Node.js 20 이상과 npm
+- Node.js 22.13 이상과 npm
 - Rust stable 1.77.2 이상
 - Codex CLI 0.144.6 이상 권장
-- ChatGPT 계정으로 로그인된 Codex CLI
+- 계정 사용량 조회를 지원하는 인증 방식으로 로그인된 Codex CLI (ChatGPT 로그인 권장)
 
-Codex CLI가 없거나 로그인하지 않았다면 먼저 설치 및 로그인을 완료합니다.
+Codex CLI가 없다면 [공식 Codex CLI 안내](https://developers.openai.com/codex/cli)에 따라 설치합니다. 설치 후 ChatGPT 등 계정 사용량 조회를 지원하는 방식으로 로그인합니다. API Key와 Amazon Bedrock 인증은 지원하지 않습니다.
 
 ```sh
 codex --version
@@ -77,6 +77,8 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib connects_to_installed_code
 
 ```text
 src/                  React 오버레이 UI, 표시 규칙, 프런트 테스트
+src-tauri/src/lib.rs
+                      Tauri 앱 초기화, 창·트레이·메뉴와 프런트 명령 연결
 src-tauri/src/codex.rs
                       CLI 탐지, JSONL app-server 클라이언트, 재연결
 src-tauri/src/usage.rs
