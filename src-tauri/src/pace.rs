@@ -1185,7 +1185,7 @@ mod tests {
     }
 
     #[test]
-    fn default_weekly_plan_matches_the_current_real_world_case() {
+    fn default_weekly_plan_matches_a_representative_case() {
         let resets_at = 7 * DAY_SECONDS;
         let window = weekly_window(25, resets_at);
         let planned =

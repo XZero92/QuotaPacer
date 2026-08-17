@@ -213,7 +213,7 @@ mod tests {
 
         assert_eq!(windows.len(), 1);
         assert_eq!(windows[0].window_duration_mins, Some(10_080));
-        assert_eq!(windows[0].remaining_percent, 74);
+        assert_eq!(windows[0].remaining_percent, 60);
         assert!(!windows
             .iter()
             .any(|window| window.id.ends_with("secondary")));

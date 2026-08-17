@@ -676,7 +676,7 @@ input.on("line", (line) => {{
   let result = {{}};
   if (message.method === "account/read") result = {{ account: {{ type: "chatgpt", planType: "free" }} }};
   if (message.method === "account/rateLimits/read") result = {{
-    rateLimitsByLimitId: {{ codex: {{ limitId: "codex", planType: "plus", primary: {{ usedPercent: 26, windowDurationMins: 10080, resetsAt: 1785076374 }}, secondary: null }} }}
+    rateLimitsByLimitId: {{ codex: {{ limitId: "codex", planType: "plus", primary: {{ usedPercent: 40, windowDurationMins: 10080, resetsAt: 2000000000 }}, secondary: null }} }}
   }};
   if (message.id !== undefined) process.stdout.write(JSON.stringify({{ id: message.id, result }}) + "\n");
 }});
