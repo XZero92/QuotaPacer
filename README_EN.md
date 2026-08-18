@@ -18,11 +18,6 @@ Product principles and established technical and UX decisions are documented in 
 - Drag positioning and persistence of opacity, language, pace, and window settings
 - Size, Settings, refresh, hide, and quit actions from the tray and overlay menus
 - Automatic Codex CLI discovery with direct executable selection when discovery fails
-- Korean and English UI
-
-## Distribution status
-
-Official installers are not currently provided. GitHub Actions verifies Windows, macOS, and Linux builds but does not distribute the results, so the app must be built from source.
 
 ## Runtime requirements
 
