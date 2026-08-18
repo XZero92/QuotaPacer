@@ -47,4 +47,4 @@ jobs:
       - run: cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml --lib
-      - run: npm run tauri build -- --bundles ${{ matrix.bundle }}
+      - run: npm run tauri -- build --bundles ${{ matrix.bundle }}

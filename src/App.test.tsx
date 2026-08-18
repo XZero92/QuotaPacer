@@ -1125,6 +1125,8 @@ describe("Codex 사용량 오버레이", () => {
     expect(
       screen.getByRole("button", { name: "More menu" }),
     ).toBeInTheDocument();
-    expect(document.documentElement).toHaveAttribute("lang", "en");
+    await waitFor(() =>
+      expect(document.documentElement).toHaveAttribute("lang", "en"),
+    );
   });
 });
