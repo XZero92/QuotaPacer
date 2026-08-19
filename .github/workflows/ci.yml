@@ -9,7 +9,21 @@ permissions:
   contents: read
 
 jobs:
+  security-audit:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - run: npm ci
+      - run: npm audit --audit-level=moderate
+
   verify:
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -23,8 +37,8 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22.13.0
           cache: npm
@@ -40,7 +54,6 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
 
       - run: npm ci
-      - run: npm audit --audit-level=moderate
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
