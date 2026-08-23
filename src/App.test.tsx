@@ -440,7 +440,7 @@ describe("Codex 사용량 오버레이", () => {
       ],
       updatedAt: 649_216,
     });
-    render(<App />);
+    const { container } = render(<App />);
 
     expect(
       await screen.findByRole("region", { name: "Codex 페이스 예측" }),
@@ -454,8 +454,12 @@ describe("Codex 사용량 오버레이", () => {
     expect(screen.queryByText(/^Codex$/)).not.toBeInTheDocument();
     expect(screen.getByText("계획상 17%p 여유")).toBeInTheDocument();
     expect(screen.getByText("계획보다 18%p 초과")).toBeInTheDocument();
+    expect(screen.getByText("현재 페이스 유지 가능")).toBeInTheDocument();
     expect(screen.getByText("초기화 시 52% 사용 예상")).toBeInTheDocument();
     expect(screen.getByText("45분 일찍 소진")).toBeInTheDocument();
+    expect(
+      screen.getByText("초기화까지 쓰려면 페이스를 늦추세요"),
+    ).toBeInTheDocument();
     expect(screen.queryByText("초기화 전 소진 예상")).not.toBeInTheDocument();
     expect(screen.getByText("누적 평균")).toBeInTheDocument();
     expect(screen.getByText("최근 8.3시간")).toBeInTheDocument();
@@ -477,7 +481,19 @@ describe("Codex 사용량 오버레이", () => {
     expect(screen.getByText("현재 26% · 계획선 43%")).toBeInTheDocument();
     expect(screen.getByText("주간")).toBeInTheDocument();
     expect(screen.getByText("5시간")).toBeInTheDocument();
+    expect(container.querySelectorAll(".pace-status-symbol")).toHaveLength(2);
+    expect(
+      container.querySelector(".status-safe .pace-status-symbol"),
+    ).toHaveTextContent("✓");
+    expect(
+      container.querySelector(".status-exhaustionRisk .pace-status-symbol"),
+    ).toHaveTextContent("!");
+    const safeRow = screen
+      .getByText("현재 페이스 유지 가능")
+      .closest(".pace-row");
     const riskRow = screen.getByText("45분 일찍 소진").closest(".pace-row");
+    expect(safeRow?.querySelector(".forecast-timeline")).not.toBeNull();
+    expect(safeRow?.querySelector(".timeline-marker")).toBeNull();
     const timeline = riskRow?.querySelector(".forecast-timeline");
     const gauge = riskRow?.querySelector(".plan-visual");
     expect(riskRow).not.toBeNull();

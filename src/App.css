@@ -658,7 +658,15 @@ body,
   min-width: 0;
   min-height: 24px;
   margin-top: 2px;
+  justify-content: space-between;
   gap: 8px;
+}
+
+.pace-verdict {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
 }
 
 .pace-summary strong {
@@ -671,6 +679,20 @@ body,
   white-space: nowrap;
 }
 
+.pace-status-symbol {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  place-items: center;
+  color: #14161a;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  background: var(--status-tone);
+  border-radius: 50%;
+}
+
 .pace-summary i {
   flex: 0 0 auto;
   padding: 2px 6px;
@@ -680,6 +702,17 @@ body,
   line-height: 16px;
   background: #282c33;
   border-radius: 999px;
+}
+
+.pace-context {
+  min-height: 15px;
+  padding-left: 22px;
+  overflow: hidden;
+  color: var(--color-secondary-text);
+  font-size: 12px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .window-label {

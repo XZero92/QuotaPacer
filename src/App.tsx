@@ -488,30 +488,12 @@ function paceSummaryLabel(
       : null;
 
   switch (status) {
-    case "safe": {
-      if (exhaustionAt !== null && exhaustionAt === resetsAt) {
-        return text(
-          language,
-          "초기화 시 100% 사용 예상",
-          "Expected to reach 100% at reset",
-        );
-      }
-      if (
-        pace?.projectedEndPercent !== null &&
-        pace?.projectedEndPercent !== undefined
-      ) {
-        return text(
-          language,
-          `초기화 시 ${Math.round(pace.projectedEndPercent)}% 사용 예상`,
-          `Expected usage at reset: ${Math.round(pace.projectedEndPercent)}%`,
-        );
-      }
+    case "safe":
       return text(
         language,
         "현재 페이스 유지 가능",
         "Current pace is sustainable",
       );
-    }
     case "planExceeded": {
       const delta = Math.round(Math.abs(pace?.planDeltaPercentPoints ?? 0));
       return text(
@@ -547,6 +529,64 @@ function paceSummaryLabel(
     default:
       return text(language, "예측 준비 중", "Preparing forecast");
   }
+}
+
+function paceContextLabel(
+  pace: PaceWindowView | undefined,
+  resetsAt: number | null,
+  status: PaceDisplayStatus,
+  language: Language,
+) {
+  if (status === "safe") {
+    const exhaustionAt = pace?.projectedExhaustionAt ?? null;
+    if (exhaustionAt !== null && exhaustionAt === resetsAt) {
+      return text(
+        language,
+        "초기화 시 100% 사용 예상",
+        "Expected to reach 100% at reset",
+      );
+    }
+    if (
+      pace?.projectedEndPercent !== null &&
+      pace?.projectedEndPercent !== undefined
+    ) {
+      return text(
+        language,
+        `초기화 시 ${Math.round(pace.projectedEndPercent)}% 사용 예상`,
+        `Expected usage at reset: ${Math.round(pace.projectedEndPercent)}%`,
+      );
+    }
+    return text(
+      language,
+      "초기화까지 사용 가능",
+      "Usage should last through reset",
+    );
+  }
+  if (status === "planExceeded") {
+    return text(
+      language,
+      "계획으로 돌아가려면 페이스를 늦추세요",
+      "Slow down to return to the plan",
+    );
+  }
+  if (status === "earlyRisk" || status === "exhaustionRisk") {
+    return text(
+      language,
+      "초기화까지 쓰려면 페이스를 늦추세요",
+      "Slow down to keep usage available until reset",
+    );
+  }
+  return text(
+    language,
+    "사용 기록이 더 필요합니다",
+    "More usage history is needed",
+  );
+}
+
+function paceStatusSymbol(status: PaceDisplayStatus) {
+  if (status === "safe") return "✓";
+  if (status === "unavailable") return "…";
+  return "!";
 }
 
 function forecastBasisLabel(
@@ -1213,6 +1253,12 @@ function PaceRow({
   const usedPercent = Math.max(0, Math.min(100, window.usedPercent));
   const status = paceDisplayStatus(pace, window.resetsAt);
   const basisLabel = forecastBasisLabel(pace, language);
+  const contextLabel = paceContextLabel(
+    pace,
+    window.resetsAt,
+    status,
+    language,
+  );
 
   return (
     <article className={`pace-row status-${status}`}>
@@ -1229,11 +1275,17 @@ function PaceRow({
         </span>
       </div>
       <div className="pace-summary">
-        <strong>
-          {paceSummaryLabel(pace, window.resetsAt, status, language)}
-        </strong>
+        <span className="pace-verdict">
+          <span className="pace-status-symbol" aria-hidden="true">
+            {paceStatusSymbol(status)}
+          </span>
+          <strong>
+            {paceSummaryLabel(pace, window.resetsAt, status, language)}
+          </strong>
+        </span>
         {basisLabel !== null && <i>{basisLabel}</i>}
       </div>
+      <div className="pace-context">{contextLabel}</div>
       <ForecastTimeline
         pace={pace}
         resetsAt={window.resetsAt}
