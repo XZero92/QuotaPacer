@@ -136,19 +136,20 @@ body,
   z-index: 2;
   inset: 0;
   pointer-events: none;
+  background: linear-gradient(var(--color-marker), var(--color-marker)) top
+    center / 2px 4px no-repeat;
   transform: rotate(calc(var(--plan-remaining) * 3.6deg));
 }
 
 .small-plan-marker::before {
   position: absolute;
-  top: -3px;
+  top: -4px;
   left: 50%;
-  width: 2px;
-  height: 10px;
+  width: 8px;
+  height: 5px;
   content: "";
   background: var(--color-marker);
-  border-radius: 999px;
-  box-shadow: 0 0 0 1px #15171b;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
   transform: translateX(-50%);
 }
 
@@ -351,6 +352,19 @@ body,
   background: var(--color-marker);
   border-radius: 999px;
   box-shadow: 0 0 0 1px #15171b;
+  transform: translateX(-50%);
+}
+
+.usage-plan-marker::before {
+  position: absolute;
+  top: -3px;
+  left: 50%;
+  width: 8px;
+  height: 4px;
+  content: "";
+  background: var(--color-marker);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  filter: drop-shadow(0 1px 0 #15171b);
   transform: translateX(-50%);
 }
 
