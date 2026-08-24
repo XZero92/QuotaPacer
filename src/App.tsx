@@ -504,15 +504,11 @@ function paceSummaryLabel(
     }
     case "earlyRisk":
       return leadDuration === null
-        ? text(
-            language,
-            "초기 추정 · 소진 가능성 있음",
-            "Early estimate · may run out",
-          )
+        ? text(language, "초기화 전 소진 가능", "May run out before reset")
         : text(
             language,
-            `초기 추정 · ${leadDuration} 일찍 소진 가능`,
-            `Early estimate · may run out ${leadDuration} early`,
+            `${leadDuration} 일찍 소진 가능`,
+            `May run out ${leadDuration} early`,
           );
     case "exhaustionRisk":
       return leadDuration === null
@@ -569,7 +565,14 @@ function paceContextLabel(
       "Slow down to return to the plan",
     );
   }
-  if (status === "earlyRisk" || status === "exhaustionRisk") {
+  if (status === "earlyRisk") {
+    return text(
+      language,
+      "누적 평균 · 페이스를 늦추세요",
+      "Period average · slow down",
+    );
+  }
+  if (status === "exhaustionRisk") {
     return text(
       language,
       "초기화까지 쓰려면 페이스를 늦추세요",
@@ -594,6 +597,13 @@ function forecastBasisLabel(
   language: Language,
 ) {
   if (!pace || pace.forecastBasis === "unavailable") return null;
+  if (pace.earlyEstimate) {
+    return text(
+      language,
+      `초기 · ${observedHoursLabel(pace)}시간`,
+      `Early · ${observedHoursLabel(pace)}h`,
+    );
+  }
   if (pace.forecastBasis === "recent") {
     return text(
       language,
@@ -1266,7 +1276,9 @@ function PaceRow({
         <strong className="window-label">
           {windowLabel(window, language)}
         </strong>
-        <span className="pace-remaining">
+        <span
+          className={`pace-remaining tone-text-${usageTone(window.remainingPercent)}`}
+        >
           {text(
             language,
             `${window.remainingPercent}% 남음`,

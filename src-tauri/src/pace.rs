@@ -13,6 +13,7 @@ const SAMPLE_INTERVAL_SECONDS: i64 = 5 * 60;
 const HISTORY_RETENTION_SECONDS: i64 = 25 * 60 * 60;
 const RECENT_LOOKBACK_SECONDS: i64 = 24 * 60 * 60;
 const MIN_RECENT_OBSERVATION_SECONDS: i64 = 6 * 60 * 60;
+const MIN_CONFIDENT_PERIOD_USED_PERCENT: f64 = 5.0;
 const WINDOW_RESET_TOLERANCE_SECONDS: i64 = 5 * 60;
 const ALERT_CONFIRMATION_INTERVAL_SECONDS: i64 = 60;
 const DAY_SECONDS: i64 = 24 * 60 * 60;
@@ -489,6 +490,10 @@ fn period_average_forecast(
         return None;
     }
     let confidence_threshold = (duration_seconds / 100).max(15 * 60);
+    let early_estimate = observed_seconds < confidence_threshold
+        || (duration_seconds >= DAY_SECONDS
+            && (observed_seconds < MIN_RECENT_OBSERVATION_SECONDS
+                || used_percent < MIN_CONFIDENT_PERIOD_USED_PERCENT));
     Some(project_forecast(
         ForecastBasis::PeriodAverage,
         used_percent,
@@ -496,7 +501,7 @@ fn period_average_forecast(
         as_of,
         resets_at,
         observed_seconds,
-        observed_seconds < confidence_threshold,
+        early_estimate,
     ))
 }
 
@@ -919,6 +924,30 @@ mod tests {
         assert_eq!(pace.status, PaceStatus::ExhaustionRisk);
         assert_eq!(pace.projected_end_percent, Some(140.0));
         assert!(pace.projected_exhaustion_at.unwrap() < resets_at);
+    }
+
+    #[test]
+    fn long_period_average_requires_time_and_usage_for_confidence() {
+        let resets_at = 7 * DAY_SECONDS;
+        let cases = [
+            (3 * 60 * 60, 3, true),
+            (MIN_RECENT_OBSERVATION_SECONDS, 4, true),
+            (MIN_RECENT_OBSERVATION_SECONDS, 5, false),
+        ];
+
+        for (as_of, used_percent, expected_early_estimate) in cases {
+            let pace = calculate_window(
+                &weekly_window(used_percent, resets_at),
+                as_of,
+                &PaceSettings::default(),
+                &[],
+                Some(0),
+            );
+
+            assert_eq!(pace.forecast_basis, ForecastBasis::PeriodAverage);
+            assert_eq!(pace.status, PaceStatus::ExhaustionRisk);
+            assert_eq!(pace.early_estimate, expected_early_estimate);
+        }
     }
 
     #[test]

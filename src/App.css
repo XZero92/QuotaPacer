@@ -1,7 +1,7 @@
 :root {
   --color-actual: #72e6ad;
   --color-plan-warning: #f4b95f;
-  --color-borrow-1: #efd777;
+  --color-borrow-1: #e2c14f;
   --color-borrow-2: #f4b95f;
   --color-borrow-3: #ed8747;
   --color-exhaustion-danger: #ff6b72;
@@ -649,9 +649,12 @@ body,
 .pace-heading > span {
   flex: 0 0 auto;
   margin-left: 8px;
-  color: var(--color-primary-text);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+
+.pace-remaining {
+  color: var(--color-primary-text);
 }
 
 .pace-summary {
@@ -829,7 +832,7 @@ body,
 }
 
 .deviation-stage-band.stage-borrow1 {
-  background: rgb(239 215 119 / 24%);
+  background: rgb(226 193 79 / 28%);
 }
 
 .deviation-stage-band.stage-borrow2 {
@@ -873,6 +876,11 @@ body,
   border: 2px solid #14161a;
   border-radius: 50%;
   transform: translate(-50%, -50%);
+}
+
+.deviation-marker.stage-near {
+  background: #14161a;
+  border-color: var(--color-marker);
 }
 
 .deviation-marker.marker-under {

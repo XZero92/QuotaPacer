@@ -391,6 +391,30 @@ describe("Codex 사용량 오버레이", () => {
   );
 
   it.each([
+    { remainingPercent: 74, tone: "normal" },
+    { remainingPercent: 50, tone: "warning" },
+    { remainingPercent: 19, tone: "danger" },
+  ])(
+    "large의 잔여량 숫자는 $remainingPercent%에 $tone 색상을 적용한다",
+    async ({ remainingPercent, tone }) => {
+      mockStartup("large", {
+        ...weeklyOnly,
+        windows: [
+          {
+            ...weeklyOnly.windows[0],
+            usedPercent: 100 - remainingPercent,
+            remainingPercent,
+          },
+        ],
+      });
+      render(<App />);
+
+      const remaining = await screen.findByText(`${remainingPercent}% 남음`);
+      expect(remaining).toHaveClass("pace-remaining", `tone-text-${tone}`);
+    },
+  );
+
+  it.each([
     { size: "small" as const, marker: ".small-plan-marker" },
     { size: "middle" as const, marker: ".usage-plan-marker" },
   ])(
@@ -773,6 +797,7 @@ describe("Codex 사용량 오버레이", () => {
           projectedEndPercent: 120,
           status: "exhaustionRisk",
           earlyEstimate: true,
+          observedHours: 3.2,
         },
       ],
       updatedAt: weeklyPace.updatedAt,
@@ -781,7 +806,11 @@ describe("Codex 사용량 오버레이", () => {
     const { container } = render(<App />);
 
     expect(
-      await screen.findByText(/초기 추정 · 2일 7시간 일찍 소진 가능/),
+      await screen.findByText("2일 7시간 일찍 소진 가능"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("초기 · 3.2시간")).toBeInTheDocument();
+    expect(
+      screen.getByText("누적 평균 · 페이스를 늦추세요"),
     ).toBeInTheDocument();
     expect(
       screen.getByLabelText(
@@ -795,6 +824,15 @@ describe("Codex 사용량 오버레이", () => {
           "",
       ),
     ).toBeCloseTo(43, 0);
+
+    mocks.listeners.get("ui://language-changed")?.({ payload: "en" });
+    expect(
+      await screen.findByText("May run out 2d 7h early"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Early · 3.2h")).toBeInTheDocument();
+    expect(screen.getByText("Period average · slow down")).toBeInTheDocument();
+
+    mocks.listeners.get("ui://language-changed")?.({ payload: "ko" });
 
     mocks.listeners.get("pace://state-changed")?.({
       payload: {
