@@ -137,19 +137,18 @@ body,
   inset: 0;
   pointer-events: none;
   background: linear-gradient(var(--color-marker), var(--color-marker)) top
-    center / 2px 4px no-repeat;
+    center / 2px 5px no-repeat;
   transform: rotate(calc(var(--plan-remaining) * 3.6deg));
 }
 
 .small-plan-marker::before {
   position: absolute;
-  top: -4px;
+  top: -2px;
   left: 50%;
   width: 8px;
-  height: 5px;
+  height: 2px;
   content: "";
   background: var(--color-marker);
-  clip-path: polygon(0 0, 100% 0, 50% 100%);
   transform: translateX(-50%);
 }
 
