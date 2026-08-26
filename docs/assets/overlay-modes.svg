@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title description">
   <title id="title">QuotaPacer overlay modes</title>
-  <desc id="description">Small and Middle overlays show the featured usage window, while Large shows pace details for every returned window.</desc>
+  <desc id="description">Small and Middle prioritize a 300-minute usage window. Large shows a compact short-window row and detailed pacing for longer returned windows.</desc>
   <defs>
     <linearGradient id="canvas" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#0d1014"/>
@@ -36,13 +36,13 @@
   <g filter="url(#shadow)">
     <rect x="72" y="102" width="304" height="112" rx="30" fill="#14161a" stroke="#ffffff" stroke-opacity="0.12"/>
     <circle cx="132" cy="158" r="41" fill="none" stroke="#30343b" stroke-width="10"/>
-    <circle cx="132" cy="158" r="41" fill="none" stroke="#72e6ad" stroke-width="10" stroke-linecap="round" stroke-dasharray="154.6 257.6" transform="rotate(-90 132 158)"/>
+    <circle cx="132" cy="158" r="41" fill="none" stroke="#efd777" stroke-width="10" stroke-linecap="round" stroke-dasharray="79.9 257.6" transform="rotate(-90 132 158)"/>
     <circle cx="132" cy="158" r="31" fill="#15171b" stroke="#ffffff" stroke-opacity="0.07"/>
-    <line x1="132" y1="106" x2="132" y2="126" stroke="#15171b" stroke-width="6" stroke-linecap="round" transform="rotate(234 132 158)"/>
-    <line x1="132" y1="106" x2="132" y2="126" stroke="#f6f7f9" stroke-width="4" stroke-linecap="round" transform="rotate(234 132 158)"/>
-    <text class="primary" x="132" y="164" text-anchor="middle" font-size="22">60%</text>
+    <text class="primary" x="132" y="164" text-anchor="middle" font-size="22">31%</text>
+    <circle cx="164" cy="128" r="10" fill="#ff6b72" stroke="#14161a" stroke-width="3"/>
+    <text x="164" y="132" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="800">!</text>
     <text class="primary" x="195" y="153" font-size="25">Codex</text>
-    <text class="muted" x="195" y="181" font-size="20" font-weight="600">Weekly</text>
+    <text class="muted" x="195" y="181" font-size="20" font-weight="600">5 hours</text>
     <text class="secondary" x="348" y="139" text-anchor="middle" font-size="24">•••</text>
   </g>
 
@@ -50,18 +50,18 @@
   <g filter="url(#shadow)">
     <rect x="72" y="310" width="500" height="128" rx="28" fill="#14161a" stroke="#ffffff" stroke-opacity="0.12"/>
     <text class="primary" x="98" y="346" font-size="23">Codex</text>
-    <text class="secondary" x="170" y="346" font-size="20">· Weekly</text>
+    <text class="secondary" x="170" y="346" font-size="20">· 5 hours</text>
+    <text class="value" x="500" y="346" text-anchor="end" font-size="19">63% remaining</text>
     <text class="secondary" x="542" y="340" text-anchor="middle" font-size="24">•••</text>
     <rect x="98" y="365" width="448" height="12" rx="6" fill="#30343b"/>
-    <rect x="98" y="365" width="269" height="12" rx="6" fill="url(#green-bar)"/>
-    <line x1="389" y1="359" x2="389" y2="383" stroke="#f6f7f9" stroke-width="3" stroke-linecap="round"/>
-    <text class="muted" x="98" y="411" font-size="19">Resets Sun 11:32 PM</text>
-    <text class="value" x="546" y="411" text-anchor="end" font-size="20">60% remaining</text>
+    <rect x="98" y="365" width="282" height="12" rx="6" fill="url(#green-bar)"/>
+    <text class="muted" x="98" y="411" font-size="19">Resets in 2h 41m</text>
+    <text class="value" x="546" y="411" text-anchor="end" font-size="19">Enough until reset</text>
   </g>
 
   <text class="mode" x="622" y="78">LARGE · PACE FOR EVERY WINDOW</text>
   <g filter="url(#shadow)">
-    <rect x="622" y="102" width="506" height="552" rx="28" fill="#14161a" stroke="#ffffff" stroke-opacity="0.12"/>
+    <rect x="622" y="102" width="506" height="408" rx="28" fill="#14161a" stroke="#ffffff" stroke-opacity="0.12"/>
     <text class="primary" x="648" y="144" font-size="26">Codex Pace</text>
     <circle cx="795" cy="137" r="5" fill="#72e6ad"/>
     <rect x="915" y="118" width="152" height="40" rx="10" fill="#2d323a" stroke="#56606d"/>
@@ -69,57 +69,41 @@
     <text class="secondary" x="1098" y="143" text-anchor="middle" font-size="24">•••</text>
     <line x1="622" y1="172" x2="1128" y2="172" stroke="#ffffff" stroke-opacity="0.08"/>
 
-    <text class="primary" x="650" y="198" font-size="18">Weekly</text>
-    <text class="primary" x="1098" y="198" text-anchor="end" font-size="18">74% remaining</text>
-    <text class="value" x="650" y="225" font-size="20">Expected usage at reset: 52%</text>
-    <rect x="980" y="207" width="118" height="25" rx="13" fill="#282c33"/>
-    <text class="secondary" x="1039" y="224" text-anchor="middle" font-size="13">Period average</text>
+    <text class="primary" x="650" y="198" font-size="18">5 hours</text>
+    <text class="warning" x="1098" y="198" text-anchor="end" font-size="18">31% remaining</text>
+    <circle cx="657" cy="224" r="9" fill="#ff6b72"/>
+    <text x="657" y="228" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="800">!</text>
+    <text x="674" y="229" fill="#ff6b72" font-size="19" font-weight="700">Runs out in about 35m</text>
+    <text class="muted" x="650" y="253" font-size="14">About 1h 10m before reset · Last 35m · +18 pp</text>
+    <rect x="650" y="264" width="448" height="8" rx="4" fill="#30343b"/>
+    <rect x="650" y="264" width="139" height="8" rx="4" fill="url(#warning-bar)"/>
 
-    <text class="muted" x="1098" y="252" text-anchor="end" font-size="14">Resets Sun 11:32 PM</text>
-    <line x1="650" y1="265" x2="1098" y2="265" stroke="#aeb4bd" stroke-opacity="0.75"/>
-    <line x1="650" y1="261" x2="650" y2="269" stroke="#aeb4bd"/>
-    <line x1="1098" y1="261" x2="1098" y2="269" stroke="#aeb4bd"/>
+    <line x1="646" y1="292" x2="1104" y2="292" stroke="#ffffff" stroke-opacity="0.08"/>
 
-    <text class="secondary" x="650" y="293" font-size="14">Plan variance</text>
-    <text class="value" x="1098" y="293" text-anchor="end" font-size="14">17 pp under plan</text>
-    <text class="muted" x="650" y="314" font-size="13">Under</text>
-    <text class="muted" x="874" y="314" text-anchor="middle" font-size="13">Plan</text>
-    <text class="muted" x="1098" y="314" text-anchor="end" font-size="13">Over</text>
-    <rect x="650" y="321" width="448" height="10" rx="5" fill="#30343b"/>
-    <path d="M650 321H874V331H650Z" fill="#72e6ad" opacity="0.14"/>
-    <rect x="885.2" y="321" width="148.8" height="10" fill="#efd777" opacity="0.24"/>
-    <path d="M1034 321H1093A5 5 0 0 1 1098 326A5 5 0 0 1 1093 331H1034Z" fill="#f4b95f" opacity="0.28"/>
-    <rect x="863" y="321" width="22" height="10" fill="#4a4d52"/>
-    <line x1="874" y1="317" x2="874" y2="335" stroke="#f6f7f9"/>
-    <circle cx="684" cy="326" r="7" fill="#72e6ad" stroke="#14161a" stroke-width="2"/>
-    <text class="secondary" x="650" y="353" font-size="14">Current 26% · plan line 43%</text>
+    <text class="primary" x="650" y="322" font-size="18">Weekly</text>
+    <text class="primary" x="1098" y="322" text-anchor="end" font-size="18">74% remaining</text>
+    <text class="value" x="650" y="349" font-size="20">Expected usage at reset: 52%</text>
+    <rect x="980" y="331" width="118" height="25" rx="13" fill="#282c33"/>
+    <text class="secondary" x="1039" y="348" text-anchor="middle" font-size="13">Period average</text>
 
-    <line x1="646" y1="377" x2="1104" y2="377" stroke="#ffffff" stroke-opacity="0.08"/>
+    <text class="muted" x="1098" y="376" text-anchor="end" font-size="14">Resets Sun 11:32 PM</text>
+    <line x1="650" y1="389" x2="1098" y2="389" stroke="#aeb4bd" stroke-opacity="0.75"/>
+    <line x1="650" y1="385" x2="650" y2="393" stroke="#aeb4bd"/>
+    <line x1="1098" y1="385" x2="1098" y2="393" stroke="#aeb4bd"/>
 
-    <text class="primary" x="650" y="407" font-size="18">5 hours</text>
-    <text class="primary" x="1098" y="407" text-anchor="end" font-size="18">40% remaining</text>
-    <text x="650" y="434" fill="#ff6b72" font-size="20" font-weight="700">Runs out 45m early</text>
-    <rect x="975" y="416" width="123" height="25" rx="13" fill="#282c33"/>
-    <text class="secondary" x="1036" y="433" text-anchor="middle" font-size="13">Last 8.3 hours</text>
-
-    <text x="650" y="461" fill="#ff6b72" font-size="14" font-weight="700">Runs out 10:30 PM</text>
-    <text class="muted" x="1098" y="461" text-anchor="end" font-size="14">Resets 11:15 PM</text>
-    <line x1="650" y1="474" x2="1098" y2="474" stroke="#aeb4bd" stroke-opacity="0.75"/>
-    <line x1="650" y1="470" x2="650" y2="478" stroke="#aeb4bd"/>
-    <line x1="1098" y1="470" x2="1098" y2="478" stroke="#aeb4bd"/>
-    <circle cx="984" cy="474" r="7" fill="#ff6b72" stroke="#14161a" stroke-width="2"/>
-
-    <text class="secondary" x="650" y="502" font-size="14">Plan variance</text>
-    <text class="warning" x="1098" y="502" text-anchor="end" font-size="14">18 pp over plan</text>
-    <text class="muted" x="650" y="523" font-size="13">Under</text>
-    <text class="muted" x="874" y="523" text-anchor="middle" font-size="13">Plan</text>
-    <text class="muted" x="1098" y="523" text-anchor="end" font-size="13">Over</text>
-    <rect x="650" y="530" width="448" height="10" rx="5" fill="#30343b"/>
-    <path d="M650 530H874V540H650Z" fill="#72e6ad" opacity="0.14"/>
-    <rect x="863" y="530" width="22" height="10" fill="#4a4d52"/>
-    <line x1="874" y1="526" x2="874" y2="544" stroke="#f6f7f9"/>
-    <circle cx="1076" cy="535" r="7" fill="#efd777" stroke="#14161a" stroke-width="2"/>
-    <text class="secondary" x="650" y="562" font-size="14">Current 60% · plan line 42%</text>
+    <text class="secondary" x="650" y="417" font-size="14">Plan variance</text>
+    <text class="value" x="1098" y="417" text-anchor="end" font-size="14">17 pp under plan</text>
+    <text class="muted" x="650" y="438" font-size="13">Under</text>
+    <text class="muted" x="874" y="438" text-anchor="middle" font-size="13">Plan</text>
+    <text class="muted" x="1098" y="438" text-anchor="end" font-size="13">Over</text>
+    <rect x="650" y="445" width="448" height="10" rx="5" fill="#30343b"/>
+    <path d="M650 445H874V455H650Z" fill="#72e6ad" opacity="0.14"/>
+    <rect x="885.2" y="445" width="148.8" height="10" fill="#efd777" opacity="0.24"/>
+    <path d="M1034 445H1093A5 5 0 0 1 1098 450A5 5 0 0 1 1093 455H1034Z" fill="#f4b95f" opacity="0.28"/>
+    <rect x="863" y="445" width="22" height="10" fill="#4a4d52"/>
+    <line x1="874" y1="441" x2="874" y2="459" stroke="#f6f7f9"/>
+    <circle cx="684" cy="450" r="7" fill="#72e6ad" stroke="#14161a" stroke-width="2"/>
+    <text class="secondary" x="650" y="477" font-size="14">Current 26% · plan line 43%</text>
   </g>
 
   <text class="muted" x="72" y="676" font-size="16">Synthetic values · Layouts shown at different scales for comparison</text>

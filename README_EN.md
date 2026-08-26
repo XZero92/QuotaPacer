@@ -12,8 +12,9 @@ Product principles and established technical and UX decisions are documented in 
 
 ## Key features
 
-- An always-on-top overlay with three information densities and every limit window actually returned
-- Plan comparison, exhaustion forecasts, inline warnings, and optional OS notifications
+- An always-on-top overlay with three information densities: Small and Middle prioritize a 300-minute limit window, while Large shows every limit window actually returned
+- Observation confidence and exhaustion risk for windows shorter than 24 hours, plus plan and exhaustion comparisons for longer windows
+- Inline warnings and optional OS notifications for confirmed risks
 - Periodic and event-driven refresh, retention of the last value during disconnection, and automatic reconnection
 - Drag positioning and persistence of opacity, language, pace, and window settings
 - Size, Settings, refresh, hide, and quit actions from the tray and overlay menus
