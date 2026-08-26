@@ -351,7 +351,14 @@ describe("Codex 사용량 오버레이", () => {
     const compactDuration = await screen.findByText("5h");
     expect(compactDuration).toBeInTheDocument();
     expect(getComputedStyle(compactDuration).whiteSpace).toBe("nowrap");
-    expect(document.querySelector(".small-risk-icon")).toBeInTheDocument();
+    const riskIcon = document.querySelector(".small-risk-icon");
+    expect(riskIcon).toBeInTheDocument();
+    expect(riskIcon?.closest(".small-ring")).toBeInTheDocument();
+    expect(getComputedStyle(riskIcon!).position).toBe("absolute");
+    expect(getComputedStyle(riskIcon!).right).toBe("-4px");
+    expect(
+      getComputedStyle(screen.getByRole("button", { name: "More menu" })).width,
+    ).toBe("28px");
     expect(screen.queryByText(/runs out/i)).not.toBeInTheDocument();
     expect(
       screen.getByLabelText(

@@ -180,15 +180,19 @@ body,
 }
 
 .small-risk-icon {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  right: -4px;
   display: inline-grid;
-  width: 13px;
-  height: 13px;
-  margin-left: 4px;
+  width: 12px;
+  height: 12px;
   place-items: center;
   color: #14161a;
-  font-size: 9px;
+  font-size: 8px;
   line-height: 1;
   background: var(--color-exhaustion-danger);
+  border: 1px solid #15171b;
   border-radius: 50%;
 }
 

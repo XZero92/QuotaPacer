@@ -489,17 +489,15 @@ function SmallOverlay({
         {!short && plannedRemaining !== null && (
           <i className="small-plan-marker" aria-hidden="true" />
         )}
+        {short && shortStatus === "risk" && (
+          <span className="small-risk-icon" aria-hidden="true">
+            !
+          </span>
+        )}
         <strong>{featured.remainingPercent}%</strong>
       </div>
       <div className="small-copy">
-        <strong>
-          Codex
-          {short && shortStatus === "risk" && (
-            <span className="small-risk-icon" aria-hidden="true">
-              !
-            </span>
-          )}
-        </strong>
+        <strong>Codex</strong>
         <small>
           {short ? compactDurationLabel : durationLabel}
           {!short && usage.connection === "stale"
