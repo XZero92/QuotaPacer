@@ -972,7 +972,7 @@ function SettingsApp() {
               type="range"
               min={MIN_OVERLAY_OPACITY}
               max="100"
-              step="5"
+              step="1"
               aria-label={text(language, "오버레이 투명도", "Overlay opacity")}
               aria-valuetext={text(
                 language,

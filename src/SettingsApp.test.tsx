@@ -149,6 +149,22 @@ describe("설정 창", () => {
     ).toHaveLength(1);
   });
 
+  it("투명도 슬라이더를 1% 단위로 조절한다", async () => {
+    const slider = await renderLoadedSettings();
+
+    expect(slider).toHaveAttribute("step", "1");
+    fireEvent.change(slider, { target: { value: "99" } });
+
+    expect(slider).toHaveValue("99");
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith("preview_overlay_opacity", {
+        sessionId: 1,
+        revision: 1,
+        overlayOpacity: 99,
+      }),
+    );
+  });
+
   it("한 요일의 강도만 바꾸고 실제 배분 합계를 100%로 유지한다", async () => {
     await renderLoadedSettings();
     const sliders = screen.getAllByRole("slider", {
