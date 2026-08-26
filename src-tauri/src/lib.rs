@@ -22,7 +22,7 @@ use tauri::{
     Emitter, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State,
     WebviewWindow, WindowEvent, Wry,
 };
-use usage::UsageViewState;
+use usage::{UsageViewState, UsageWindow};
 
 struct AppState {
     usage: UsageService,
@@ -573,10 +573,11 @@ fn show_overlay_context_menu(
 #[tauri::command]
 fn set_overlay_layout(
     size: OverlaySize,
-    window_count: usize,
     window: WebviewWindow,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
-    resize_overlay_window(&window, size, window_count)
+    let usage = state.usage.state();
+    resize_overlay_window(&window, size, &usage.windows)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -611,7 +612,7 @@ pub fn run() {
             let menus = setup_menus(app, settings.overlay_size(), settings.language())?;
             app.manage(menus);
             if let Some(window) = app.get_webview_window("main") {
-                let (width, height) = overlay_dimensions(settings.overlay_size(), 0);
+                let (width, height) = overlay_dimensions(settings.overlay_size(), &[]);
                 window.set_size(LogicalSize::new(width, height))?;
                 position_window(&window, &settings);
                 install_window_handlers(&window);
@@ -816,40 +817,55 @@ fn quit_app(app: &tauri::AppHandle) {
 }
 
 fn select_overlay_size(app: &tauri::AppHandle, size: OverlaySize) {
-    let window_count = if let Some(state) = app.try_state::<AppState>() {
-        let window_count = state.usage.state().windows.len();
+    let windows = if let Some(state) = app.try_state::<AppState>() {
+        let windows = state.usage.state().windows;
         let _ = state.settings.set_overlay_size(size);
-        window_count
+        windows
     } else {
-        0
+        Vec::new()
     };
     if let Some(menus) = app.try_state::<OverlayMenus>() {
         let _ = menus.sync(size);
     }
     if let Some(window) = app.get_webview_window("main") {
-        let _ = resize_overlay_window(&window, size, window_count);
+        let _ = resize_overlay_window(&window, size, &windows);
     }
     let _ = app.emit("ui://overlay-size-changed", size);
 }
 
-fn overlay_dimensions(size: OverlaySize, window_count: usize) -> (f64, f64) {
+fn overlay_dimensions(size: OverlaySize, windows: &[UsageWindow]) -> (f64, f64) {
     if size != OverlaySize::Large {
         return size.base_dimensions();
     }
 
-    let extra_rows = window_count.saturating_sub(1) as f64;
-    (360.0, (240.0 + extra_rows * 176.0).min(520.0))
+    if windows.is_empty() {
+        return (360.0, 240.0);
+    }
+    let short_rows = windows
+        .iter()
+        .filter(|window| {
+            window
+                .window_duration_mins
+                .and_then(|minutes| minutes.checked_mul(60))
+                .is_some_and(|seconds| seconds > 0 && seconds < 24 * 60 * 60)
+        })
+        .count() as f64;
+    let detail_rows = windows.len() as f64 - short_rows;
+    (
+        360.0,
+        (16.0 + 48.0 + short_rows * 88.0 + detail_rows * 176.0).min(520.0),
+    )
 }
 
 fn resize_overlay_window(
     window: &WebviewWindow,
     size: OverlaySize,
-    window_count: usize,
+    windows: &[UsageWindow],
 ) -> Result<(), String> {
     let old_position = window.outer_position().ok();
     let old_size = window.outer_size().ok();
     let monitor = window.current_monitor().ok().flatten();
-    let (width, height) = overlay_dimensions(size, window_count);
+    let (width, height) = overlay_dimensions(size, windows);
 
     window
         .set_size(LogicalSize::new(width, height))
@@ -1034,6 +1050,7 @@ mod tests {
         OverlayAppearancePreviewController, OverlayMenuPosition,
     };
     use crate::settings::{LargePlanVisualization, OverlaySize};
+    use crate::usage::UsageWindow;
     use tauri::{PhysicalPosition, PhysicalSize};
 
     fn appearance(
@@ -1046,17 +1063,70 @@ mod tests {
         }
     }
 
-    #[test]
-    fn collapsed_dimensions_follow_the_selected_information_density() {
-        assert_eq!(overlay_dimensions(OverlaySize::Small, 1), (152.0, 56.0));
-        assert_eq!(overlay_dimensions(OverlaySize::Middle, 1), (280.0, 72.0));
-        assert_eq!(overlay_dimensions(OverlaySize::Large, 1), (360.0, 240.0));
+    fn usage_window(id: &str, duration_minutes: i64) -> UsageWindow {
+        UsageWindow {
+            id: id.to_string(),
+            bucket_id: "codex".to_string(),
+            bucket_label: None,
+            used_percent: 0,
+            remaining_percent: 100,
+            window_duration_mins: Some(duration_minutes),
+            resets_at: None,
+        }
     }
 
     #[test]
-    fn large_layout_grows_per_window_and_bounds_its_height() {
-        assert_eq!(overlay_dimensions(OverlaySize::Large, 2), (360.0, 416.0));
-        assert_eq!(overlay_dimensions(OverlaySize::Large, 100), (360.0, 520.0));
+    fn collapsed_dimensions_follow_the_selected_information_density() {
+        let weekly = [usage_window("weekly", 7 * 24 * 60)];
+        assert_eq!(
+            overlay_dimensions(OverlaySize::Small, &weekly),
+            (152.0, 56.0)
+        );
+        assert_eq!(
+            overlay_dimensions(OverlaySize::Middle, &weekly),
+            (280.0, 72.0)
+        );
+        assert_eq!(
+            overlay_dimensions(OverlaySize::Large, &weekly),
+            (360.0, 240.0)
+        );
+    }
+
+    #[test]
+    fn large_layout_uses_short_and_detail_row_heights_and_bounds_its_height() {
+        let short = usage_window("five-hours", 300);
+        let weekly = usage_window("weekly", 7 * 24 * 60);
+        assert_eq!(
+            overlay_dimensions(OverlaySize::Large, std::slice::from_ref(&short)),
+            (360.0, 152.0)
+        );
+        assert_eq!(
+            overlay_dimensions(OverlaySize::Large, std::slice::from_ref(&weekly)),
+            (360.0, 240.0)
+        );
+        assert_eq!(
+            overlay_dimensions(OverlaySize::Large, &[short.clone(), weekly.clone()]),
+            (360.0, 328.0)
+        );
+        assert_eq!(
+            overlay_dimensions(OverlaySize::Large, &[weekly.clone(), weekly]),
+            (360.0, 416.0)
+        );
+        assert_eq!(
+            overlay_dimensions(
+                OverlaySize::Large,
+                &[
+                    short.clone(),
+                    short.clone(),
+                    short.clone(),
+                    short.clone(),
+                    short.clone(),
+                    short,
+                ],
+            ),
+            (360.0, 520.0)
+        );
+        assert_eq!(overlay_dimensions(OverlaySize::Large, &[]), (360.0, 240.0));
     }
 
     #[test]

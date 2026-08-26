@@ -32,10 +32,11 @@ import {
   useLanguage,
 } from "./i18n";
 import {
-  featuredWindow,
   formatResetTime,
+  formatCompactWindowDuration,
   formatWindowDuration,
   INITIAL_USAGE_STATE,
+  preferredCompactWindow,
   sortedWindows,
   staleAgeLabel,
   staleLabel,
@@ -281,20 +282,129 @@ function plannedRemainingPercent(pace: PaceWindowView | undefined) {
   return Math.max(0, Math.min(100, 100 - pace.plannedUsedPercent));
 }
 
-function observedHoursLabel(pace: PaceWindowView) {
-  return Math.round((pace.observedHours ?? 0) * 10) / 10;
+function isShortWindow(window: UsageWindow) {
+  return (
+    window.windowDurationMins !== null &&
+    window.windowDurationMins > 0 &&
+    window.windowDurationMins < 24 * 60
+  );
+}
+
+function formatObservedDuration(
+  seconds: number | null | undefined,
+  language: Language,
+) {
+  const totalMinutes = Math.max(0, Math.round((seconds ?? 0) / 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0 && minutes > 0) {
+    return text(language, `${hours}시간 ${minutes}분`, `${hours}h ${minutes}m`);
+  }
+  if (hours > 0) return text(language, `${hours}시간`, `${hours}h`);
+  return text(language, `${minutes}분`, `${minutes}m`);
+}
+
+function formatRelativeDuration(seconds: number, language: Language) {
+  const totalMinutes = Math.max(0, Math.ceil(seconds / 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0 && minutes > 0) {
+    return text(language, `${hours}시간 ${minutes}분`, `${hours}h ${minutes}m`);
+  }
+  if (hours > 0) return text(language, `${hours}시간`, `${hours}h`);
+  return text(language, `${minutes}분`, `${minutes}m`);
+}
+
+function formatApproximateDuration(seconds: number, language: Language) {
+  const roundedMinutes = Math.max(0, Math.round(seconds / (5 * 60)) * 5);
+  const duration = formatRelativeDuration(roundedMinutes * 60, language);
+  return text(language, `약 ${duration}`, `about ${duration}`);
+}
+
+function resetCountdown(
+  resetsAt: number | null,
+  updatedAt: number | null,
+  language: Language,
+) {
+  if (resetsAt === null || updatedAt === null) {
+    return text(language, "초기화 시각 미정", "Reset time unknown");
+  }
+  return text(
+    language,
+    `${formatRelativeDuration(resetsAt - updatedAt, language)} 후 초기화`,
+    `Resets in ${formatRelativeDuration(resetsAt - updatedAt, language)}`,
+  );
+}
+
+type ShortPaceStatus = "collecting" | "provisional" | "safe" | "risk";
+
+function shortPaceStatus(
+  pace: PaceWindowView | undefined,
+  resetsAt: number | null,
+): ShortPaceStatus {
+  if (pace?.forecastConfidence === "provisional") return "provisional";
+  if (pace?.forecastConfidence !== "confirmed") return "collecting";
+  if (
+    pace.status === "exhaustionRisk" &&
+    pace.projectedExhaustionAt !== null &&
+    resetsAt !== null &&
+    pace.projectedExhaustionAt < resetsAt
+  ) {
+    return "risk";
+  }
+  return "safe";
+}
+
+function shortRiskDuration(
+  pace: PaceWindowView | undefined,
+  updatedAt: number | null,
+  language: Language,
+) {
+  if (
+    pace?.projectedExhaustionAt === null ||
+    pace?.projectedExhaustionAt === undefined ||
+    updatedAt === null
+  ) {
+    return null;
+  }
+  return formatApproximateDuration(
+    pace.projectedExhaustionAt - updatedAt,
+    language,
+  );
+}
+
+function recentObservationLabel(
+  pace: PaceWindowView | undefined,
+  language: Language,
+) {
+  if (
+    pace?.observedSeconds === null ||
+    pace?.observedSeconds === undefined ||
+    pace.recentUsedPercentPoints === null ||
+    pace.recentUsedPercentPoints === undefined
+  ) {
+    return null;
+  }
+  const delta = Math.round(pace.recentUsedPercentPoints * 10) / 10;
+  return text(
+    language,
+    `최근 ${formatObservedDuration(pace.observedSeconds, language)} · ${delta}%p 사용`,
+    `Last ${formatObservedDuration(pace.observedSeconds, language)} · ${delta} pp used`,
+  );
 }
 
 function SmallOverlay({
   usage,
   featured,
   pace,
+  updatedAt,
   recovery,
   onOpenMenu,
 }: {
   usage: UsageViewState;
   featured: UsageWindow | null;
   pace: PaceWindowView | undefined;
+  updatedAt: number | null;
   recovery?: CliRecoveryActions;
   onOpenMenu: (position: OverlayMenuPosition) => void;
 }) {
@@ -311,6 +421,33 @@ function SmallOverlay({
   }
 
   const plannedRemaining = plannedRemainingPercent(pace);
+  const short = isShortWindow(featured);
+  const shortStatus = shortPaceStatus(pace, featured.resetsAt);
+  const durationLabel = formatWindowDuration(
+    featured.windowDurationMins,
+    language,
+  );
+  const compactDurationLabel = formatCompactWindowDuration(
+    featured.windowDurationMins,
+    language,
+  );
+  const riskDuration = shortRiskDuration(pace, updatedAt, language);
+  const confidenceLabel =
+    shortStatus === "collecting"
+      ? text(language, "페이스 관측 중입니다", "Pace is being observed")
+      : shortStatus === "provisional"
+        ? text(language, "추세를 확인 중입니다", "The trend is being checked")
+        : shortStatus === "risk" && riskDuration !== null
+          ? text(
+              language,
+              `${riskDuration} 후 소진 위험입니다`,
+              `Risk of running out in ${riskDuration}`,
+            )
+          : text(
+              language,
+              "초기화까지 충분합니다",
+              "Usage should last until reset",
+            );
   const planLabel =
     plannedRemaining === null
       ? ""
@@ -327,8 +464,12 @@ function SmallOverlay({
       }`}
       aria-label={text(
         language,
-        `Codex · ${windowLabel(featured, language)} 제한 ${featured.remainingPercent}% 남음`,
-        `Codex · ${windowLabel(featured, language)} limit, ${featured.remainingPercent}% remaining`,
+        short
+          ? `Codex ${windowLabel(featured, language)} 제한은 ${featured.remainingPercent}% 남았습니다. ${resetCountdown(featured.resetsAt, updatedAt, language)}. ${confidenceLabel}.${usage.connection === "stale" ? " 업데이트가 지연되고 있습니다." : ""}`
+          : `Codex · ${windowLabel(featured, language)} 제한 ${featured.remainingPercent}% 남음`,
+        short
+          ? `The Codex ${windowLabel(featured, language)} limit has ${featured.remainingPercent}% remaining. ${resetCountdown(featured.resetsAt, updatedAt, language)}. ${confidenceLabel}.${usage.connection === "stale" ? " Updates are delayed." : ""}`
+          : `Codex · ${windowLabel(featured, language)} limit, ${featured.remainingPercent}% remaining`,
       )}
     >
       <div
@@ -345,16 +486,23 @@ function SmallOverlay({
           `Circular gauge, ${featured.remainingPercent}% remaining${planLabel}`,
         )}
       >
-        {plannedRemaining !== null && (
+        {!short && plannedRemaining !== null && (
           <i className="small-plan-marker" aria-hidden="true" />
         )}
         <strong>{featured.remainingPercent}%</strong>
       </div>
       <div className="small-copy">
-        <strong>Codex</strong>
+        <strong>
+          Codex
+          {short && shortStatus === "risk" && (
+            <span className="small-risk-icon" aria-hidden="true">
+              !
+            </span>
+          )}
+        </strong>
         <small>
-          {formatWindowDuration(featured.windowDurationMins, language)}
-          {usage.connection === "stale"
+          {short ? compactDurationLabel : durationLabel}
+          {!short && usage.connection === "stale"
             ? text(language, " · 지연", " · delayed")
             : ""}
         </small>
@@ -371,12 +519,14 @@ function MiddleOverlay({
   usage,
   featured,
   pace,
+  updatedAt,
   recovery,
   onOpenMenu,
 }: {
   usage: UsageViewState;
   featured: UsageWindow | null;
   pace: PaceWindowView | undefined;
+  updatedAt: number | null;
   recovery?: CliRecoveryActions;
   onOpenMenu: (position: OverlayMenuPosition) => void;
 }) {
@@ -388,6 +538,21 @@ function MiddleOverlay({
   }
 
   const plannedRemaining = plannedRemainingPercent(pace);
+  const short = isShortWindow(featured);
+  const shortStatus = shortPaceStatus(pace, featured.resetsAt);
+  const riskDuration = shortRiskDuration(pace, updatedAt, language);
+  const shortFooterStatus =
+    shortStatus === "collecting"
+      ? text(language, "관측 중", "Observing")
+      : shortStatus === "provisional"
+        ? text(language, "추세 확인 중", "Checking trend")
+        : shortStatus === "risk" && riskDuration !== null
+          ? text(
+              language,
+              `${riskDuration} 후 소진`,
+              `Runs out in ${riskDuration}`,
+            )
+          : text(language, "초기화까지 충분", "Enough until reset");
   const planLabel =
     plannedRemaining === null
       ? ""
@@ -401,6 +566,17 @@ function MiddleOverlay({
     <div className="middle-card">
       <div className="middle-heading">
         <WindowHeadingLabel window={featured} />
+        {short && (
+          <span
+            className={`middle-remaining tone-text-${usageTone(featured.remainingPercent)}`}
+          >
+            {text(
+              language,
+              `${featured.remainingPercent}% 남음`,
+              `${featured.remainingPercent}% remaining`,
+            )}
+          </span>
+        )}
       </div>
       <div
         className="usage-meter"
@@ -414,7 +590,7 @@ function MiddleOverlay({
           className={`tone-${usageTone(featured.remainingPercent)}`}
           style={{ width: `${featured.remainingPercent}%` }}
         />
-        {plannedRemaining !== null && (
+        {!short && plannedRemaining !== null && (
           <i
             className={`usage-plan-marker align-${markerAlignment(plannedRemaining)}`}
             style={{ left: `${plannedRemaining}%` }}
@@ -426,21 +602,25 @@ function MiddleOverlay({
         <small>
           {usage.connection === "stale"
             ? staleLabel(usage.lastSuccessfulAt, undefined, language)
-            : text(
-                language,
-                `${formatResetTime(featured.resetsAt, language)} 리셋`,
-                `Resets ${formatResetTime(featured.resetsAt, language)}`,
-              )}
+            : short
+              ? resetCountdown(featured.resetsAt, updatedAt, language)
+              : text(
+                  language,
+                  `${formatResetTime(featured.resetsAt, language)} 리셋`,
+                  `Resets ${formatResetTime(featured.resetsAt, language)}`,
+                )}
         </small>
         <span
           className={`middle-remaining tone-text-${usageTone(featured.remainingPercent)}`}
-          aria-hidden="true"
+          aria-hidden={!short}
         >
-          {text(
-            language,
-            `${featured.remainingPercent}% 남음`,
-            `${featured.remainingPercent}% remaining`,
-          )}
+          {short
+            ? shortFooterStatus
+            : text(
+                language,
+                `${featured.remainingPercent}% 남음`,
+                `${featured.remainingPercent}% remaining`,
+              )}
         </span>
       </div>
       <MoreMenuButton onOpen={onOpenMenu} />
@@ -463,7 +643,9 @@ function paceDisplayStatus(
     pace.projectedExhaustionAt < resetsAt;
 
   if (pace.status === "exhaustionRisk" && exhaustionBeforeReset) {
-    return pace.earlyEstimate ? "earlyRisk" : "exhaustionRisk";
+    return pace.forecastConfidence === "provisional"
+      ? "earlyRisk"
+      : "exhaustionRisk";
   }
   if (pace.status === "planExceeded") return "planExceeded";
   if (
@@ -597,18 +779,18 @@ function forecastBasisLabel(
   language: Language,
 ) {
   if (!pace || pace.forecastBasis === "unavailable") return null;
-  if (pace.earlyEstimate) {
+  if (pace.forecastConfidence === "provisional") {
     return text(
       language,
-      `초기 · ${observedHoursLabel(pace)}시간`,
-      `Early · ${observedHoursLabel(pace)}h`,
+      `초기 · ${formatObservedDuration(pace.observedSeconds, language)}`,
+      `Early · ${formatObservedDuration(pace.observedSeconds, language)}`,
     );
   }
   if (pace.forecastBasis === "recent") {
     return text(
       language,
-      `최근 ${observedHoursLabel(pace)}시간`,
-      `Last ${observedHoursLabel(pace)} hours`,
+      `최근 ${formatObservedDuration(pace.observedSeconds, language)}`,
+      `Last ${formatObservedDuration(pace.observedSeconds, language)}`,
     );
   }
   return text(language, "누적 평균", "Period average");
@@ -622,8 +804,8 @@ function forecastBasisDescription(
   if (pace.forecastBasis === "recent") {
     return text(
       language,
-      `최근 ${observedHoursLabel(pace)}시간의 평균 속도`,
-      `the average pace over the last ${observedHoursLabel(pace)} hours`,
+      `최근 ${formatObservedDuration(pace.observedSeconds, language)}의 평균 속도`,
+      `the average pace over the last ${formatObservedDuration(pace.observedSeconds, language)}`,
     );
   }
   return text(language, "누적 평균 속도", "the period-average pace");
@@ -1248,6 +1430,108 @@ function ForecastTimeline({
   );
 }
 
+function ShortPaceRow({
+  window,
+  pace,
+  updatedAt,
+}: {
+  window: UsageWindow;
+  pace: PaceWindowView | undefined;
+  updatedAt: number | null;
+}) {
+  const language = useLanguage();
+  const status = shortPaceStatus(pace, window.resetsAt);
+  const exhaustionDuration = shortRiskDuration(pace, updatedAt, language);
+  const observation = recentObservationLabel(pace, language);
+  const summary =
+    status === "collecting"
+      ? text(language, "페이스 관측 중", "Observing pace")
+      : status === "provisional"
+        ? text(
+            language,
+            "최근 사용 증가 · 추세 확인 중",
+            "Recent usage increased · checking trend",
+          )
+        : status === "risk" && exhaustionDuration !== null
+          ? text(
+              language,
+              `${exhaustionDuration} 후 소진`,
+              `Runs out in ${exhaustionDuration}`,
+            )
+          : text(language, "초기화까지 충분", "Enough until reset");
+  const leadDuration =
+    pace?.projectedExhaustionAt !== null &&
+    pace?.projectedExhaustionAt !== undefined &&
+    window.resetsAt !== null
+      ? formatApproximateDuration(
+          window.resetsAt - pace.projectedExhaustionAt,
+          language,
+        )
+      : null;
+  const context =
+    status === "risk" && leadDuration !== null
+      ? [
+          text(
+            language,
+            `초기화보다 ${leadDuration} 빠름`,
+            `${leadDuration} before reset`,
+          ),
+          observation,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : [resetCountdown(window.resetsAt, updatedAt, language), observation]
+          .filter(Boolean)
+          .join(" · ");
+
+  return (
+    <article
+      className={`short-pace-row status-${status}`}
+      aria-label={text(
+        language,
+        `${windowLabel(window, language)}, ${window.remainingPercent}% 남음. ${summary}. ${context}.`,
+        `${windowLabel(window, language)}, ${window.remainingPercent}% remaining. ${summary}. ${context}.`,
+      )}
+    >
+      <div className="pace-heading">
+        <strong className="window-label">
+          {windowLabel(window, language)}
+        </strong>
+        <span
+          className={`pace-remaining tone-text-${usageTone(window.remainingPercent)}`}
+        >
+          {text(
+            language,
+            `${window.remainingPercent}% 남음`,
+            `${window.remainingPercent}% remaining`,
+          )}
+        </span>
+      </div>
+      <div className="short-pace-content">
+        <span className="short-pace-verdict">
+          {status === "risk" && <i aria-hidden="true">!</i>}
+          <strong>{summary}</strong>
+        </span>
+        <small>{context}</small>
+      </div>
+      <div
+        className="short-capacity-meter"
+        role="img"
+        aria-label={text(
+          language,
+          `남은 용량 ${window.remainingPercent}%`,
+          `${window.remainingPercent}% capacity remaining`,
+        )}
+      >
+        <span
+          className={`tone-${usageTone(window.remainingPercent)}`}
+          style={{ width: `${window.remainingPercent}%` }}
+        />
+      </div>
+    </article>
+  );
+}
+
 function PaceRow({
   window,
   pace,
@@ -1444,15 +1728,24 @@ function LargeOverlay({
         </div>
       </header>
       <div className="pace-rows">
-        {windows.map((window) => (
-          <PaceRow
-            key={window.id}
-            window={window}
-            pace={paceByWindow.get(window.id)}
-            updatedAt={pace.updatedAt}
-            visualization={planVisualization}
-          />
-        ))}
+        {windows.map((window) =>
+          isShortWindow(window) ? (
+            <ShortPaceRow
+              key={window.id}
+              window={window}
+              pace={paceByWindow.get(window.id)}
+              updatedAt={pace.updatedAt}
+            />
+          ) : (
+            <PaceRow
+              key={window.id}
+              window={window}
+              pace={paceByWindow.get(window.id)}
+              updatedAt={pace.updatedAt}
+              visualization={planVisualization}
+            />
+          ),
+        )}
       </div>
     </div>
   );
@@ -1482,6 +1775,16 @@ function App() {
   const draggingRef = useRef(false);
   const planVisualizationPendingRef = useRef(false);
   const lastAppearanceUpdateIdRef = useRef(-1);
+  const overlayLayoutKey = useMemo(
+    () =>
+      usage.windows
+        .map(
+          (window) => `${window.id}:${window.windowDurationMins ?? "unknown"}`,
+        )
+        .sort()
+        .join("|"),
+    [usage.windows],
+  );
 
   const applyAppearanceUpdate = useCallback(
     (update: OverlayAppearanceUpdate) => {
@@ -1645,13 +1948,10 @@ function App() {
 
   useEffect(() => {
     if (!sizeReady) return;
-    void invoke("set_overlay_layout", {
-      size: sizeMode,
-      windowCount: usage.windows.length,
-    });
-  }, [sizeMode, sizeReady, usage.windows.length]);
+    void invoke("set_overlay_layout", { size: sizeMode });
+  }, [overlayLayoutKey, sizeMode, sizeReady]);
 
-  const featured = featuredWindow(usage);
+  const featured = preferredCompactWindow(usage);
   const featuredPace = featured
     ? pace.windows.find((window) => window.windowId === featured.id)
     : undefined;
@@ -1685,6 +1985,7 @@ function App() {
             usage={usage}
             featured={featured}
             pace={featuredPace}
+            updatedAt={pace.updatedAt}
             recovery={cliRecovery}
             onOpenMenu={showMenuAt}
           />
@@ -1693,6 +1994,7 @@ function App() {
             usage={usage}
             featured={featured}
             pace={featuredPace}
+            updatedAt={pace.updatedAt}
             recovery={cliRecovery}
             onOpenMenu={showMenuAt}
           />

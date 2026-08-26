@@ -164,7 +164,9 @@ body,
 .small-copy {
   display: flex;
   min-width: 0;
+  flex: 1;
   flex-direction: column;
+  overflow: hidden;
   line-height: 1.1;
 }
 
@@ -177,12 +179,28 @@ body,
   white-space: nowrap;
 }
 
+.small-risk-icon {
+  display: inline-grid;
+  width: 13px;
+  height: 13px;
+  margin-left: 4px;
+  place-items: center;
+  color: #14161a;
+  font-size: 9px;
+  line-height: 1;
+  background: var(--color-exhaustion-danger);
+  border-radius: 50%;
+}
+
 .small-copy small {
+  overflow: hidden;
   margin-top: 2px;
   color: #8d949e;
   font-size: 12px;
   font-weight: 600;
   line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cli-recovery-compact {
@@ -285,6 +303,14 @@ body,
 
 .middle-heading strong {
   min-width: 0;
+}
+
+.middle-heading > .middle-remaining {
+  max-width: 92px;
+  margin-left: 8px;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
 }
 
 .middle-heading .window-label > span:last-child {
@@ -618,12 +644,93 @@ body,
 
 .pace-row {
   --status-tone: var(--color-actual);
-  min-height: 176px;
+  height: 176px;
   padding: 10px 2px;
 }
 
-.pace-row + .pace-row {
+.pace-row + .pace-row,
+.pace-row + .short-pace-row,
+.short-pace-row + .pace-row,
+.short-pace-row + .short-pace-row {
   border-top: 1px solid rgb(255 255 255 / 7%);
+}
+
+.short-pace-row {
+  --status-tone: var(--color-actual);
+  height: 88px;
+  padding: 8px 2px;
+}
+
+.short-pace-row.status-collecting,
+.short-pace-row.status-provisional {
+  --status-tone: var(--color-unavailable);
+}
+
+.short-pace-row.status-risk {
+  --status-tone: var(--color-exhaustion-danger);
+}
+
+.short-pace-content {
+  display: flex;
+  min-width: 0;
+  height: 35px;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.short-pace-verdict {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
+.short-pace-verdict > i {
+  display: inline-grid;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  place-items: center;
+  color: #14161a;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1;
+  background: var(--color-exhaustion-danger);
+  border-radius: 50%;
+}
+
+.short-pace-verdict > strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--status-tone);
+  font-size: 14px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.short-pace-content > small {
+  overflow: hidden;
+  color: var(--color-secondary-text);
+  font-size: 11px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.short-capacity-meter {
+  height: 5px;
+  overflow: hidden;
+  background: var(--color-track);
+  border-radius: 999px;
+}
+
+.short-capacity-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--tone, var(--color-actual));
+  border-radius: inherit;
 }
 
 .pace-row.status-planExceeded {

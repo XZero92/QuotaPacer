@@ -33,6 +33,13 @@ export function featuredWindow(state: UsageViewState) {
   return declared ?? sortedWindows(state.windows)[0] ?? null;
 }
 
+export function preferredCompactWindow(state: UsageViewState) {
+  const shortQuotaWindows = sortedWindows(
+    state.windows.filter((window) => window.windowDurationMins === 300),
+  );
+  return shortQuotaWindows[0] ?? featuredWindow(state);
+}
+
 export function formatWindowDuration(
   minutes: number | null,
   language: Language = "ko",
@@ -46,6 +53,17 @@ export function formatWindowDuration(
   if (minutes % 60 === 0)
     return text(language, `${minutes / 60}시간`, `${minutes / 60} hours`);
   return text(language, `${minutes}분`, `${minutes} min`);
+}
+
+export function formatCompactWindowDuration(
+  minutes: number | null,
+  language: Language = "ko",
+) {
+  if (minutes === null) return text(language, "한도", "Limit");
+  if (minutes < 60) return text(language, `${minutes}분`, `${minutes}m`);
+  if (minutes % 60 === 0)
+    return text(language, `${minutes / 60}시간`, `${minutes / 60}h`);
+  return text(language, `${minutes}분`, `${minutes}m`);
 }
 
 export function formatResetTime(

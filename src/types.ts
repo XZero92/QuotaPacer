@@ -36,6 +36,8 @@ export interface CliInfo {
 }
 
 export type ForecastBasis = "recent" | "periodAverage" | "unavailable";
+export type ForecastConfidence =
+  "collecting" | "provisional" | "confirmed" | "unavailable";
 export type PaceStatus =
   "safe" | "planExceeded" | "exhaustionRisk" | "unavailable";
 
@@ -55,14 +57,15 @@ export interface PacePlanBreakdownView {
 export interface PaceWindowView {
   windowId: string;
   forecastBasis: ForecastBasis;
-  observedHours: number | null;
+  forecastConfidence: ForecastConfidence;
+  observedSeconds: number | null;
+  recentUsedPercentPoints: number | null;
   projectedExhaustionAt: number | null;
   projectedEndPercent: number | null;
   plannedUsedPercent: number | null;
   planDeltaPercentPoints: number | null;
   planBreakdown?: PacePlanBreakdownView | null;
   status: PaceStatus;
-  earlyEstimate: boolean;
 }
 
 export interface PaceViewState {

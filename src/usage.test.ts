@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { UsageViewState, UsageWindow } from "./types";
 import {
   featuredWindow,
+  formatCompactWindowDuration,
   formatWindowDuration,
+  preferredCompactWindow,
   sortedWindows,
   staleAgeLabel,
   staleLabel,
@@ -65,6 +67,45 @@ describe("사용량 표시 규칙", () => {
     ]);
   });
 
+  it("Compact는 주간 잔량과 관계없이 300분 창을 우선한다", () => {
+    const weekly = window({
+      id: "weekly",
+      remainingPercent: 5,
+      windowDurationMins: 10_080,
+    });
+    const fiveHours = window({
+      id: "five-hours",
+      remainingPercent: 98,
+      windowDurationMins: 300,
+    });
+    expect(preferredCompactWindow(state([weekly, fiveHours]))?.id).toBe(
+      "five-hours",
+    );
+  });
+
+  it("여러 300분 창은 기존 정렬 규칙을 사용하고 소멸 시 기존 대표 창으로 대체한다", () => {
+    const weekly = window({
+      id: "weekly",
+      remainingPercent: 5,
+      windowDurationMins: 10_080,
+    });
+    const later = window({
+      id: "later",
+      remainingPercent: 40,
+      resetsAt: 200,
+    });
+    const sooner = window({
+      id: "sooner",
+      remainingPercent: 40,
+      resetsAt: 100,
+    });
+    expect(preferredCompactWindow(state([weekly, later, sooner]))?.id).toBe(
+      "sooner",
+    );
+    expect(preferredCompactWindow(state([weekly]))?.id).toBe("weekly");
+    expect(preferredCompactWindow(state([weekly, later]))?.id).toBe("later");
+  });
+
   it("고정 및 동적 지속시간 라벨을 만든다", () => {
     expect(formatWindowDuration(300)).toBe("5시간");
     expect(formatWindowDuration(10_080)).toBe("주간");
@@ -73,6 +114,13 @@ describe("사용량 표시 규칙", () => {
     expect(formatWindowDuration(null)).toBe("사용량 한도");
     expect(formatWindowDuration(10_080, "en")).toBe("Weekly");
     expect(formatWindowDuration(90, "en")).toBe("90 min");
+  });
+
+  it("Small용 지속시간은 영어 단위를 한 줄 축약형으로 만든다", () => {
+    expect(formatCompactWindowDuration(300)).toBe("5시간");
+    expect(formatCompactWindowDuration(45)).toBe("45분");
+    expect(formatCompactWindowDuration(300, "en")).toBe("5h");
+    expect(formatCompactWindowDuration(45, "en")).toBe("45m");
   });
 
   it("색상 임계치를 경계값까지 적용한다", () => {

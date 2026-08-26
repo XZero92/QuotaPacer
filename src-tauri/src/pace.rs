@@ -17,6 +17,11 @@ const MIN_CONFIDENT_PERIOD_USED_PERCENT: f64 = 5.0;
 const WINDOW_RESET_TOLERANCE_SECONDS: i64 = 5 * 60;
 const ALERT_CONFIRMATION_INTERVAL_SECONDS: i64 = 60;
 const DAY_SECONDS: i64 = 24 * 60 * 60;
+const SHORT_PROVISIONAL_MIN_SECONDS: i64 = 5 * 60;
+const SHORT_PROVISIONAL_MAX_SECONDS: i64 = 15 * 60;
+const SHORT_CONFIRMED_MIN_SECONDS: i64 = 10 * 60;
+const SHORT_CONFIRMED_MAX_SECONDS: i64 = 30 * 60;
+const SHORT_MIN_USED_DELTA_PERCENT: f64 = 2.0;
 const WEEK_MINUTES: i64 = 7 * 24 * 60;
 const PLAN_GRACE_PERCENT_POINTS: f64 = 1.0;
 
@@ -25,6 +30,16 @@ const PLAN_GRACE_PERCENT_POINTS: f64 = 1.0;
 pub enum ForecastBasis {
     Recent,
     PeriodAverage,
+    #[default]
+    Unavailable,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ForecastConfidence {
+    Collecting,
+    Provisional,
+    Confirmed,
     #[default]
     Unavailable,
 }
@@ -67,14 +82,15 @@ pub struct PacePlanBreakdownView {
 pub struct PaceWindowView {
     pub window_id: String,
     pub forecast_basis: ForecastBasis,
-    pub observed_hours: Option<f64>,
+    pub forecast_confidence: ForecastConfidence,
+    pub observed_seconds: Option<i64>,
+    pub recent_used_percent_points: Option<f64>,
     pub projected_exhaustion_at: Option<i64>,
     pub projected_end_percent: Option<f64>,
     pub planned_used_percent: Option<f64>,
     pub plan_delta_percent_points: Option<f64>,
     pub plan_breakdown: Option<PacePlanBreakdownView>,
     pub status: PaceStatus,
-    pub early_estimate: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -383,17 +399,23 @@ fn calculate_window(
     start_weekday_override: Option<usize>,
 ) -> PaceWindowView {
     let used_percent = f64::from(window.used_percent.clamp(0, 100));
+    let short_window = is_short_window(window);
     let plan = planned_used_percent(window, as_of, settings, start_weekday_override);
     let plan_breakdown = weekly_plan_breakdown(window, as_of, settings, start_weekday_override);
-    let forecast = recent_forecast(window, as_of, used_percent, samples)
-        .or_else(|| period_average_forecast(window, as_of, used_percent));
+    let forecast = if short_window {
+        short_window_forecast(window, as_of, used_percent, samples).unwrap_or_default()
+    } else {
+        recent_forecast(window, as_of, used_percent, samples)
+            .or_else(|| period_average_forecast(window, as_of, used_percent))
+            .unwrap_or_default()
+    };
     let plan_delta = plan.map(|planned| used_percent - planned);
-    let exhaustion_risk = forecast
-        .as_ref()
-        .and_then(|forecast| forecast.projected_exhaustion_at)
-        .zip(window.resets_at)
-        .map(|(exhaustion_at, resets_at)| exhaustion_at < resets_at)
-        .unwrap_or(false);
+    let exhaustion_risk = (!short_window || forecast.confidence == ForecastConfidence::Confirmed)
+        && forecast
+            .projected_exhaustion_at
+            .zip(window.resets_at)
+            .map(|(exhaustion_at, resets_at)| exhaustion_at < resets_at)
+            .unwrap_or(false);
     let plan_exceeded = plan_delta
         .map(|delta| delta > PLAN_GRACE_PERCENT_POINTS)
         .unwrap_or(false);
@@ -401,7 +423,12 @@ fn calculate_window(
         PaceStatus::ExhaustionRisk
     } else if plan_exceeded {
         PaceStatus::PlanExceeded
-    } else if forecast.is_some() {
+    } else if (!short_window || forecast.confidence == ForecastConfidence::Confirmed)
+        && matches!(
+            forecast.confidence,
+            ForecastConfidence::Provisional | ForecastConfidence::Confirmed
+        )
+    {
         PaceStatus::Safe
     } else {
         PaceStatus::Unavailable
@@ -409,34 +436,146 @@ fn calculate_window(
 
     PaceWindowView {
         window_id: window.id.clone(),
-        forecast_basis: forecast
-            .as_ref()
-            .map(|forecast| forecast.basis)
-            .unwrap_or_default(),
-        observed_hours: forecast.as_ref().map(|forecast| forecast.observed_hours),
-        projected_exhaustion_at: forecast
-            .as_ref()
-            .and_then(|forecast| forecast.projected_exhaustion_at),
-        projected_end_percent: forecast
-            .as_ref()
-            .map(|forecast| forecast.projected_end_percent),
+        forecast_basis: forecast.basis,
+        forecast_confidence: forecast.confidence,
+        observed_seconds: forecast.observed_seconds,
+        recent_used_percent_points: forecast.recent_used_percent_points,
+        projected_exhaustion_at: forecast.projected_exhaustion_at,
+        projected_end_percent: forecast.projected_end_percent,
         planned_used_percent: plan,
         plan_delta_percent_points: plan_delta,
         plan_breakdown,
         status,
-        early_estimate: forecast
-            .as_ref()
-            .map(|forecast| forecast.early_estimate)
-            .unwrap_or(false),
     }
 }
 
+#[derive(Default)]
 struct Forecast {
     basis: ForecastBasis,
-    observed_hours: f64,
+    confidence: ForecastConfidence,
+    observed_seconds: Option<i64>,
+    recent_used_percent_points: Option<f64>,
     projected_exhaustion_at: Option<i64>,
-    projected_end_percent: f64,
-    early_estimate: bool,
+    projected_end_percent: Option<f64>,
+}
+
+fn is_short_window(window: &UsageWindow) -> bool {
+    window
+        .window_duration_mins
+        .and_then(|minutes| minutes.checked_mul(60))
+        .is_some_and(|seconds| seconds > 0 && seconds < DAY_SECONDS)
+}
+
+fn short_observation_thresholds(duration_seconds: i64) -> (i64, i64) {
+    let provisional =
+        (duration_seconds / 20).clamp(SHORT_PROVISIONAL_MIN_SECONDS, SHORT_PROVISIONAL_MAX_SECONDS);
+    let confirmed =
+        (duration_seconds / 10).clamp(SHORT_CONFIRMED_MIN_SECONDS, SHORT_CONFIRMED_MAX_SECONDS);
+    (provisional, confirmed)
+}
+
+fn short_window_forecast(
+    window: &UsageWindow,
+    as_of: i64,
+    used_percent: f64,
+    samples: &[PaceSample],
+) -> Option<Forecast> {
+    let duration_seconds = window.window_duration_mins?.checked_mul(60)?;
+    if duration_seconds <= 0 || duration_seconds >= DAY_SECONDS {
+        return None;
+    }
+    let resets_at = window.resets_at?;
+    let mut matching = samples
+        .iter()
+        .filter(|sample| {
+            same_window_generation(&sample.window_id, sample.resets_at, &window.id, resets_at)
+                && sample.recorded_at <= as_of
+        })
+        .collect::<Vec<_>>();
+    matching.sort_by_key(|sample| sample.recorded_at);
+
+    let (provisional_seconds, confirmed_seconds) = short_observation_thresholds(duration_seconds);
+    if let Some(forecast) = short_forecast_at_confidence(
+        &matching,
+        as_of,
+        used_percent,
+        resets_at,
+        confirmed_seconds,
+        3,
+        ForecastConfidence::Confirmed,
+    ) {
+        return Some(forecast);
+    }
+    if let Some(forecast) = short_forecast_at_confidence(
+        &matching,
+        as_of,
+        used_percent,
+        resets_at,
+        provisional_seconds,
+        2,
+        ForecastConfidence::Provisional,
+    ) {
+        return Some(forecast);
+    }
+
+    Some(Forecast {
+        confidence: ForecastConfidence::Collecting,
+        observed_seconds: matching
+            .first()
+            .map(|sample| (as_of - sample.recorded_at).max(0)),
+        ..Forecast::default()
+    })
+}
+
+fn short_forecast_at_confidence(
+    samples: &[&PaceSample],
+    as_of: i64,
+    used_percent: f64,
+    resets_at: i64,
+    minimum_observed_seconds: i64,
+    minimum_sample_count: usize,
+    confidence: ForecastConfidence,
+) -> Option<Forecast> {
+    let baseline = samples
+        .iter()
+        .rev()
+        .find(|sample| as_of - sample.recorded_at >= minimum_observed_seconds)?;
+    let sample_count = samples
+        .iter()
+        .filter(|sample| sample.recorded_at >= baseline.recorded_at)
+        .count()
+        + usize::from(!samples.iter().any(|sample| sample.recorded_at == as_of));
+    if sample_count < minimum_sample_count {
+        return None;
+    }
+    let observed_seconds = as_of - baseline.recorded_at;
+    if observed_seconds <= 0 {
+        return None;
+    }
+    let used_delta = used_percent - f64::from(baseline.used_percent);
+    if used_delta < 0.0 {
+        return None;
+    }
+    if used_delta < SHORT_MIN_USED_DELTA_PERCENT {
+        return (confidence == ForecastConfidence::Confirmed).then_some(Forecast {
+            basis: ForecastBasis::Recent,
+            confidence,
+            observed_seconds: Some(observed_seconds),
+            recent_used_percent_points: Some(used_delta),
+            ..Forecast::default()
+        });
+    }
+    let mut forecast = project_forecast(
+        ForecastBasis::Recent,
+        confidence,
+        used_percent,
+        used_delta / observed_seconds as f64,
+        as_of,
+        resets_at,
+        observed_seconds,
+    );
+    forecast.recent_used_percent_points = Some(used_delta);
+    Some(forecast)
 }
 
 fn recent_forecast(
@@ -465,12 +604,12 @@ fn recent_forecast(
     let used_delta = used_percent - f64::from(sample.used_percent);
     Some(project_forecast(
         ForecastBasis::Recent,
+        ForecastConfidence::Confirmed,
         used_percent,
         used_delta / observed_seconds as f64,
         as_of,
         resets_at,
         observed_seconds,
-        false,
     ))
 }
 
@@ -490,29 +629,34 @@ fn period_average_forecast(
         return None;
     }
     let confidence_threshold = (duration_seconds / 100).max(15 * 60);
-    let early_estimate = observed_seconds < confidence_threshold
+    let confidence = if observed_seconds < confidence_threshold
         || (duration_seconds >= DAY_SECONDS
             && (observed_seconds < MIN_RECENT_OBSERVATION_SECONDS
-                || used_percent < MIN_CONFIDENT_PERIOD_USED_PERCENT));
+                || used_percent < MIN_CONFIDENT_PERIOD_USED_PERCENT))
+    {
+        ForecastConfidence::Provisional
+    } else {
+        ForecastConfidence::Confirmed
+    };
     Some(project_forecast(
         ForecastBasis::PeriodAverage,
+        confidence,
         used_percent,
         used_percent / observed_seconds as f64,
         as_of,
         resets_at,
         observed_seconds,
-        early_estimate,
     ))
 }
 
 fn project_forecast(
     basis: ForecastBasis,
+    confidence: ForecastConfidence,
     used_percent: f64,
     rate_per_second: f64,
     as_of: i64,
     resets_at: i64,
     observed_seconds: i64,
-    early_estimate: bool,
 ) -> Forecast {
     let remaining_seconds = (resets_at - as_of).max(0);
     let projected_end_percent = used_percent + rate_per_second * remaining_seconds as f64;
@@ -526,10 +670,11 @@ fn project_forecast(
     };
     Forecast {
         basis,
-        observed_hours: observed_seconds as f64 / 3600.0,
+        confidence,
+        observed_seconds: Some(observed_seconds),
+        recent_used_percent_points: None,
         projected_exhaustion_at,
-        projected_end_percent,
-        early_estimate,
+        projected_end_percent: Some(projected_end_percent),
     }
 }
 
@@ -543,6 +688,9 @@ fn planned_used_percent(
     let resets_at = window.resets_at?;
     let duration_seconds = duration_minutes.checked_mul(60)?;
     if duration_seconds <= 0 {
+        return None;
+    }
+    if duration_seconds < DAY_SECONDS {
         return None;
     }
     let starts_at = resets_at - duration_seconds;
@@ -680,8 +828,8 @@ fn advance_alerts_with_language(
             .plan_delta_percent_points
             .map(|delta| delta > PLAN_GRACE_PERCENT_POINTS)
             .unwrap_or(false);
-        let exhaustion_candidate =
-            pace.status == PaceStatus::ExhaustionRisk && !pace.early_estimate;
+        let exhaustion_candidate = pace.status == PaceStatus::ExhaustionRisk
+            && pace.forecast_confidence == ForecastConfidence::Confirmed;
         let confirmation = runtime
             .alert_confirmations
             .entry(window.id.clone())
@@ -908,6 +1056,27 @@ mod tests {
         }
     }
 
+    fn short_window(duration_minutes: i64, used_percent: i32, resets_at: i64) -> UsageWindow {
+        UsageWindow {
+            id: format!("codex:{duration_minutes}m"),
+            bucket_id: "codex".to_string(),
+            bucket_label: None,
+            used_percent,
+            remaining_percent: 100 - used_percent,
+            window_duration_mins: Some(duration_minutes),
+            resets_at: Some(resets_at),
+        }
+    }
+
+    fn sample(window: &UsageWindow, recorded_at: i64, used_percent: i32) -> PaceSample {
+        PaceSample {
+            window_id: window.id.clone(),
+            resets_at: window.resets_at.unwrap(),
+            recorded_at,
+            used_percent,
+        }
+    }
+
     #[test]
     fn period_average_projects_exhaustion_before_reset() {
         let resets_at = 7 * DAY_SECONDS;
@@ -946,7 +1115,14 @@ mod tests {
 
             assert_eq!(pace.forecast_basis, ForecastBasis::PeriodAverage);
             assert_eq!(pace.status, PaceStatus::ExhaustionRisk);
-            assert_eq!(pace.early_estimate, expected_early_estimate);
+            assert_eq!(
+                pace.forecast_confidence,
+                if expected_early_estimate {
+                    ForecastConfidence::Provisional
+                } else {
+                    ForecastConfidence::Confirmed
+                }
+            );
         }
     }
 
@@ -972,7 +1148,7 @@ mod tests {
         let pace = calculate_window(&window, as_of, &PaceSettings::default(), &samples, Some(0));
 
         assert_eq!(pace.forecast_basis, ForecastBasis::Recent);
-        assert_eq!(pace.observed_hours, Some(6.0));
+        assert_eq!(pace.observed_seconds, Some(MIN_RECENT_OBSERVATION_SECONDS));
         assert!(pace.projected_exhaustion_at.is_some());
     }
 
@@ -1014,7 +1190,214 @@ mod tests {
 
         let pace = calculate_window(&window, as_of, &PaceSettings::default(), &samples, Some(0));
         assert_eq!(pace.forecast_basis, ForecastBasis::Recent);
-        assert_eq!(pace.observed_hours, Some(6.0));
+        assert_eq!(pace.observed_seconds, Some(MIN_RECENT_OBSERVATION_SECONDS));
+    }
+
+    #[test]
+    fn first_short_window_snapshot_collects_without_plan_or_prediction() {
+        let as_of = 60;
+        let window = short_window(300, 2, 5 * 60 * 60);
+        let samples = vec![sample(&window, as_of, 2)];
+
+        let pace = calculate_window(&window, as_of, &PaceSettings::default(), &samples, None);
+
+        assert_eq!(pace.forecast_confidence, ForecastConfidence::Collecting);
+        assert_eq!(pace.status, PaceStatus::Unavailable);
+        assert_eq!(pace.planned_used_percent, None);
+        assert_eq!(pace.plan_delta_percent_points, None);
+        assert_eq!(pace.plan_breakdown, None);
+        assert_eq!(pace.projected_exhaustion_at, None);
+        assert_eq!(pace.projected_end_percent, None);
+
+        let usage = usage(window, as_of);
+        let view = PaceViewState {
+            windows: vec![pace],
+            updated_at: Some(as_of),
+        };
+        let mut runtime = PaceRuntime::default();
+        assert!(advance_alerts(&mut runtime, &usage, &view, true).is_empty());
+    }
+
+    #[test]
+    fn five_hour_window_uses_fifteen_and_thirty_minute_confidence_boundaries() {
+        let resets_at = 5 * 60 * 60;
+        let window = short_window(300, 2, resets_at);
+        let provisional_as_of = 15 * 60;
+        let provisional_samples = vec![sample(&window, 0, 0)];
+        let provisional = calculate_window(
+            &window,
+            provisional_as_of,
+            &PaceSettings::default(),
+            &provisional_samples,
+            None,
+        );
+        assert_eq!(
+            provisional.forecast_confidence,
+            ForecastConfidence::Provisional
+        );
+        assert_eq!(provisional.status, PaceStatus::Unavailable);
+        assert_eq!(provisional.observed_seconds, Some(15 * 60));
+        assert_eq!(provisional.recent_used_percent_points, Some(2.0));
+        let provisional_usage = usage(window.clone(), provisional_as_of);
+        let provisional_view = PaceViewState {
+            windows: vec![provisional.clone()],
+            updated_at: Some(provisional_as_of),
+        };
+        let mut runtime = PaceRuntime::default();
+        assert!(
+            advance_alerts(&mut runtime, &provisional_usage, &provisional_view, true,).is_empty()
+        );
+
+        let confirmed_as_of = 30 * 60;
+        let confirmed_samples = vec![sample(&window, 0, 0), sample(&window, 15 * 60, 1)];
+        let confirmed = calculate_window(
+            &window,
+            confirmed_as_of,
+            &PaceSettings::default(),
+            &confirmed_samples,
+            None,
+        );
+        assert_eq!(confirmed.forecast_confidence, ForecastConfidence::Confirmed);
+        assert_eq!(confirmed.observed_seconds, Some(30 * 60));
+        assert_eq!(confirmed.status, PaceStatus::Safe);
+    }
+
+    #[test]
+    fn forty_five_minute_window_clamps_to_five_and_ten_minute_boundaries() {
+        let resets_at = 45 * 60;
+        let window = short_window(45, 4, resets_at);
+        let provisional = calculate_window(
+            &window,
+            5 * 60,
+            &PaceSettings::default(),
+            &[sample(&window, 0, 2)],
+            None,
+        );
+        assert_eq!(
+            provisional.forecast_confidence,
+            ForecastConfidence::Provisional
+        );
+        assert_eq!(provisional.observed_seconds, Some(5 * 60));
+
+        let confirmed = calculate_window(
+            &window,
+            10 * 60,
+            &PaceSettings::default(),
+            &[sample(&window, 0, 2), sample(&window, 5 * 60, 3)],
+            None,
+        );
+        assert_eq!(confirmed.forecast_confidence, ForecastConfidence::Confirmed);
+        assert_eq!(confirmed.observed_seconds, Some(10 * 60));
+    }
+
+    #[test]
+    fn confirmed_short_window_with_less_than_two_percent_change_is_safe() {
+        let as_of = 30 * 60;
+        let window = short_window(300, 11, 5 * 60 * 60);
+        let samples = vec![
+            sample(&window, 0, 10),
+            sample(&window, 15 * 60, 10),
+            sample(&window, as_of, 11),
+        ];
+
+        let pace = calculate_window(&window, as_of, &PaceSettings::default(), &samples, None);
+
+        assert_eq!(pace.forecast_confidence, ForecastConfidence::Confirmed);
+        assert_eq!(pace.recent_used_percent_points, Some(1.0));
+        assert_eq!(pace.status, PaceStatus::Safe);
+        assert_eq!(pace.projected_exhaustion_at, None);
+        assert_eq!(pace.projected_end_percent, None);
+    }
+
+    #[test]
+    fn negative_short_window_change_returns_to_collecting() {
+        let as_of = 30 * 60;
+        let window = short_window(300, 8, 5 * 60 * 60);
+        let samples = vec![
+            sample(&window, 0, 10),
+            sample(&window, 15 * 60, 9),
+            sample(&window, as_of, 8),
+        ];
+
+        let pace = calculate_window(&window, as_of, &PaceSettings::default(), &samples, None);
+
+        assert_eq!(pace.forecast_confidence, ForecastConfidence::Collecting);
+        assert_eq!(pace.status, PaceStatus::Unavailable);
+        assert_eq!(pace.recent_used_percent_points, None);
+        assert_eq!(pace.projected_exhaustion_at, None);
+    }
+
+    #[test]
+    fn short_window_samples_from_a_new_reset_generation_are_not_reused() {
+        let as_of = 30 * 60;
+        let resets_at = 5 * 60 * 60;
+        let window = short_window(300, 20, resets_at);
+        let old_generation = PaceSample {
+            resets_at: resets_at - WINDOW_RESET_TOLERANCE_SECONDS - 1,
+            ..sample(&window, 0, 0)
+        };
+
+        let pace = calculate_window(
+            &window,
+            as_of,
+            &PaceSettings::default(),
+            &[old_generation, sample(&window, as_of, 20)],
+            None,
+        );
+
+        assert_eq!(pace.forecast_confidence, ForecastConfidence::Collecting);
+        assert_eq!(pace.projected_exhaustion_at, None);
+    }
+
+    #[test]
+    fn short_window_accepts_five_minutes_of_reset_jitter() {
+        let as_of = 30 * 60;
+        let resets_at = 5 * 60 * 60;
+        let window = short_window(300, 20, resets_at);
+        let samples = vec![
+            PaceSample {
+                resets_at: resets_at - WINDOW_RESET_TOLERANCE_SECONDS,
+                ..sample(&window, 0, 0)
+            },
+            PaceSample {
+                resets_at: resets_at - WINDOW_RESET_TOLERANCE_SECONDS,
+                ..sample(&window, 15 * 60, 10)
+            },
+        ];
+
+        let pace = calculate_window(&window, as_of, &PaceSettings::default(), &samples, None);
+
+        assert_eq!(pace.forecast_confidence, ForecastConfidence::Confirmed);
+        assert_eq!(pace.recent_used_percent_points, Some(20.0));
+    }
+
+    #[test]
+    fn confirmed_short_window_risk_requires_sixty_seconds_before_notifying() {
+        let as_of = 30 * 60;
+        let resets_at = 5 * 60 * 60;
+        let window = short_window(300, 80, resets_at);
+        let usage = usage(window.clone(), as_of);
+        let samples = vec![
+            sample(&window, 0, 60),
+            sample(&window, 15 * 60, 70),
+            sample(&window, as_of, 80),
+        ];
+        let view = calculate_state(&usage, &PaceSettings::default(), &samples);
+        let mut runtime = PaceRuntime::default();
+
+        assert_eq!(view.windows[0].status, PaceStatus::ExhaustionRisk);
+        assert_eq!(
+            view.windows[0].forecast_confidence,
+            ForecastConfidence::Confirmed
+        );
+        assert!(advance_alerts(&mut runtime, &usage, &view, true).is_empty());
+
+        let mut confirmed_usage = usage.clone();
+        confirmed_usage.fetched_at = Some(as_of + ALERT_CONFIRMATION_INTERVAL_SECONDS);
+        let notifications = advance_alerts(&mut runtime, &confirmed_usage, &view, true);
+        assert_eq!(notifications.len(), 1);
+        assert!(runtime.history.alerts[0].exhaustion_notified);
+        assert!(!runtime.history.alerts[0].plan_notified);
     }
 
     #[test]
@@ -1102,7 +1485,7 @@ mod tests {
             Some(0),
         );
         assert_eq!(pace.forecast_basis, ForecastBasis::Recent);
-        assert_eq!(pace.observed_hours, Some(6.0));
+        assert_eq!(pace.observed_seconds, Some(MIN_RECENT_OBSERVATION_SECONDS));
         assert_eq!(pace.projected_end_percent, Some(150.0));
 
         let first_usage = usage(window.clone(), as_of - MIN_RECENT_OBSERVATION_SECONDS + 60);
@@ -1163,10 +1546,10 @@ mod tests {
 
     #[test]
     fn exhaustion_exactly_at_reset_is_safe() {
-        let resets_at = 100 * 60;
-        let as_of = 50 * 60;
+        let resets_at = DAY_SECONDS;
+        let as_of = DAY_SECONDS / 2;
         let window = UsageWindow {
-            window_duration_mins: Some(100),
+            window_duration_mins: Some(24 * 60),
             resets_at: Some(resets_at),
             ..weekly_window(50, resets_at)
         };
@@ -1309,15 +1692,22 @@ mod tests {
     }
 
     #[test]
-    fn non_weekly_windows_use_elapsed_percent_as_the_plan() {
-        let window = UsageWindow {
-            window_duration_mins: Some(300),
-            resets_at: Some(5 * 60 * 60),
-            ..weekly_window(20, 0)
+    fn short_windows_omit_plan_while_one_day_windows_use_elapsed_percent() {
+        let short = short_window(300, 20, 5 * 60 * 60);
+        assert_eq!(
+            planned_used_percent(&short, 2 * 60 * 60, &PaceSettings::default(), None),
+            None
+        );
+
+        let one_day = UsageWindow {
+            window_duration_mins: Some(24 * 60),
+            resets_at: Some(DAY_SECONDS),
+            ..weekly_window(20, DAY_SECONDS)
         };
         let planned =
-            planned_used_percent(&window, 2 * 60 * 60, &PaceSettings::default(), None).unwrap();
-        assert_eq!(planned, 40.0);
+            planned_used_percent(&one_day, DAY_SECONDS / 2, &PaceSettings::default(), None)
+                .unwrap();
+        assert_eq!(planned, 50.0);
     }
 
     #[test]
@@ -1430,7 +1820,10 @@ mod tests {
         let view = calculate_state(&usage, &PaceSettings::default(), &[]);
         let mut runtime = PaceRuntime::default();
 
-        assert!(view.windows[0].early_estimate);
+        assert_eq!(
+            view.windows[0].forecast_confidence,
+            ForecastConfidence::Provisional
+        );
         assert_eq!(view.windows[0].status, PaceStatus::ExhaustionRisk);
         assert!(advance_alerts(&mut runtime, &usage, &view, true).is_empty());
         let mut later_usage = usage.clone();
@@ -1446,7 +1839,7 @@ mod tests {
         let usage = usage(weekly_window(60, resets_at), as_of);
         let mut view = calculate_state(&usage, &PaceSettings::default(), &[]);
         view.windows[0].status = PaceStatus::PlanExceeded;
-        view.windows[0].early_estimate = false;
+        view.windows[0].forecast_confidence = ForecastConfidence::Confirmed;
         view.windows[0].projected_exhaustion_at = None;
         let mut runtime = PaceRuntime::default();
 
@@ -1493,7 +1886,7 @@ mod tests {
         let usage = usage(weekly_window(60, resets_at), as_of);
         let mut view = calculate_state(&usage, &PaceSettings::default(), &[]);
         view.windows[0].status = PaceStatus::PlanExceeded;
-        view.windows[0].early_estimate = false;
+        view.windows[0].forecast_confidence = ForecastConfidence::Confirmed;
         view.windows[0].projected_exhaustion_at = None;
         let mut runtime = PaceRuntime::default();
 
