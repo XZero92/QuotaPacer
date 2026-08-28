@@ -671,6 +671,17 @@ describe("Codex 사용량 오버레이", () => {
     expect(safeRow?.querySelector(".forecast-timeline")).not.toBeNull();
     expect(safeRow?.querySelector(".timeline-marker")).toBeNull();
     expect(riskRow).not.toBeNull();
+    expect(getComputedStyle(riskRow as HTMLElement).height).toBe("80px");
+    expect(
+      getComputedStyle(
+        riskRow?.querySelector(".short-pace-content") as HTMLElement,
+      ).marginTop,
+    ).toBe("2px");
+    expect(
+      getComputedStyle(
+        riskRow?.querySelector(".short-capacity-meter") as HTMLElement,
+      ).marginTop,
+    ).toBe("6px");
     expect(riskRow?.querySelector(".forecast-timeline")).toBeNull();
     expect(riskRow?.querySelector(".plan-visual")).toBeNull();
     expect(riskRow?.querySelector(".short-capacity-meter")).not.toBeNull();

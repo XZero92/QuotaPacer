@@ -661,8 +661,8 @@ body,
 
 .short-pace-row {
   --status-tone: var(--color-actual);
-  height: 88px;
-  padding: 8px 2px;
+  height: 80px;
+  padding: 9px 2px;
 }
 
 .short-pace-row.status-collecting,
@@ -727,9 +727,9 @@ body,
 .short-pace-content {
   display: flex;
   min-width: 0;
-  height: 35px;
+  height: 33px;
+  margin-top: 2px;
   flex-direction: column;
-  justify-content: center;
 }
 
 .short-pace-verdict {
@@ -775,6 +775,7 @@ body,
 
 .short-capacity-meter {
   height: 5px;
+  margin-top: 6px;
   overflow: hidden;
   background: var(--color-track);
   border-radius: 999px;

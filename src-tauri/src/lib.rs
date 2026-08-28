@@ -959,7 +959,7 @@ fn overlay_dimensions(size: OverlaySize, windows: &[UsageWindow]) -> (f64, f64) 
                 .and_then(|minutes| minutes.checked_mul(60))
                 .is_some_and(|seconds| seconds > 0 && seconds < 24 * 60 * 60)
             {
-                88.0
+                80.0
             } else {
                 176.0
             }
@@ -1283,7 +1283,7 @@ mod tests {
         let weekly = usage_window("weekly", 7 * 24 * 60);
         assert_eq!(
             overlay_dimensions(OverlaySize::Large, std::slice::from_ref(&short)),
-            (360.0, 152.0)
+            (360.0, 144.0)
         );
         assert_eq!(
             overlay_dimensions(OverlaySize::Large, std::slice::from_ref(&weekly)),
@@ -1291,7 +1291,7 @@ mod tests {
         );
         assert_eq!(
             overlay_dimensions(OverlaySize::Large, &[short.clone(), weekly.clone()]),
-            (360.0, 328.0)
+            (360.0, 320.0)
         );
         assert_eq!(
             overlay_dimensions(OverlaySize::Large, &[weekly.clone(), weekly]),
