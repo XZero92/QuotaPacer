@@ -1566,6 +1566,9 @@ function LimitStatusRow({
     `${formatResetTime(window.resetsAt, language)} 초기화`,
     `Resets ${formatResetTime(window.resetsAt, language)}`,
   );
+  const showsReset = status !== "reserveWaiting";
+  const combinedDetail =
+    status === "regularExhausted" ? `${summary} · ${context}` : summary;
   const label = reserve
     ? windowLabel(window, language)
     : formatWindowDuration(window.windowDurationMins, language);
@@ -1591,26 +1594,10 @@ function LimitStatusRow({
           )}
         </span>
       </div>
-      <div className="short-pace-content">
-        <span className="short-pace-verdict">
-          <strong>{summary}</strong>
-        </span>
-        <small>{context}</small>
-      </div>
-      <div
-        className="short-capacity-meter"
-        role="img"
-        aria-label={text(
-          language,
-          `남은 용량 ${window.remainingPercent}%`,
-          `${window.remainingPercent}% capacity remaining`,
-        )}
-      >
-        <span
-          className={`tone-${usageTone(window.remainingPercent)}`}
-          style={{ width: `${window.remainingPercent}%` }}
-        />
-      </div>
+      <strong className="limit-status-summary">{combinedDetail}</strong>
+      {showsReset && status !== "regularExhausted" && (
+        <small className="limit-status-reset">{context}</small>
+      )}
     </article>
   );
 }

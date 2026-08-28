@@ -702,7 +702,12 @@ describe("Codex 사용량 오버레이", () => {
       await screen.findByText("일반 한도 소진 후 사용 가능 · Luna 전용"),
     ).toBeInTheDocument();
     expect(screen.getByText("Luna Reserve · 주간")).toBeInTheDocument();
-    expect(container.querySelectorAll(".limit-status-row")).toHaveLength(1);
+    const waitingRow = container.querySelector<HTMLElement>(
+      ".limit-status-row.status-reserveWaiting",
+    );
+    expect(waitingRow).not.toBeNull();
+    expect(getComputedStyle(waitingRow as HTMLElement).height).toBe("48px");
+    expect(waitingRow?.querySelector(".short-capacity-meter")).toBeNull();
     expect(container.querySelectorAll(".pace-row")).toHaveLength(1);
     expect(
       screen
@@ -749,9 +754,19 @@ describe("Codex 사용량 오버레이", () => {
     expect(
       await screen.findByText("Luna Reserve 사용 가능 · Luna 전용"),
     ).toBeInTheDocument();
-    expect(screen.getByText("일반 한도 소진")).toBeInTheDocument();
+    expect(screen.getByText(/일반 한도 소진 ·/)).toBeInTheDocument();
     expect(screen.queryByText("현재 페이스 유지 가능")).not.toBeInTheDocument();
+    const reserveRow = screen
+      .getByText("Luna Reserve 사용 가능 · Luna 전용")
+      .closest<HTMLElement>(".limit-status-row");
+    const exhaustedRow = screen
+      .getByText(/일반 한도 소진 ·/)
+      .closest<HTMLElement>(".limit-status-row");
     expect(container.querySelectorAll(".limit-status-row")).toHaveLength(2);
+    expect(getComputedStyle(reserveRow as HTMLElement).height).toBe("56px");
+    expect(getComputedStyle(exhaustedRow as HTMLElement).height).toBe("44px");
+    expect(reserveRow?.querySelector(".short-capacity-meter")).toBeNull();
+    expect(exhaustedRow?.querySelector(".short-capacity-meter")).toBeNull();
     expect(container.querySelectorAll(".pace-row")).toHaveLength(0);
     expect(
       screen.queryByRole("button", { name: /현재 7일 계획 표시/ }),

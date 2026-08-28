@@ -942,28 +942,29 @@ fn overlay_dimensions(size: OverlaySize, windows: &[UsageWindow]) -> (f64, f64) 
         return (360.0, 240.0);
     }
     let reserve_active = is_luna_reserve_active(windows);
-    let (short_rows, detail_rows) =
-        windows
-            .iter()
-            .fold((0.0_f64, 0.0_f64), |(short, detail), window| {
-                if is_luna_reserve(window) || (reserve_active && window.remaining_percent == 0) {
-                    (short + 1.0, detail)
-                } else if reserve_active {
-                    (short, detail)
-                } else if window
-                    .window_duration_mins
-                    .and_then(|minutes| minutes.checked_mul(60))
-                    .is_some_and(|seconds| seconds > 0 && seconds < 24 * 60 * 60)
-                {
-                    (short + 1.0, detail)
+    let row_height = windows.iter().fold(0.0_f64, |height, window| {
+        height
+            + if is_luna_reserve(window) {
+                if reserve_active {
+                    56.0
                 } else {
-                    (short, detail + 1.0)
+                    48.0
                 }
-            });
-    (
-        360.0,
-        (16.0 + 48.0 + short_rows * 88.0 + detail_rows * 176.0).min(520.0),
-    )
+            } else if reserve_active && window.remaining_percent == 0 {
+                44.0
+            } else if reserve_active {
+                0.0
+            } else if window
+                .window_duration_mins
+                .and_then(|minutes| minutes.checked_mul(60))
+                .is_some_and(|seconds| seconds > 0 && seconds < 24 * 60 * 60)
+            {
+                88.0
+            } else {
+                176.0
+            }
+    });
+    (360.0, (16.0 + 48.0 + row_height).min(520.0))
 }
 
 fn resize_overlay_window(
@@ -1319,7 +1320,7 @@ mod tests {
         let reserve = reserve_window("gpt-reserve:primary", 7 * 24 * 60);
         assert_eq!(
             overlay_dimensions(OverlaySize::Large, &[regular.clone(), reserve.clone()]),
-            (360.0, 328.0)
+            (360.0, 288.0)
         );
 
         let exhausted = UsageWindow {
@@ -1329,7 +1330,7 @@ mod tests {
         };
         assert_eq!(
             overlay_dimensions(OverlaySize::Large, &[exhausted, reserve]),
-            (360.0, 240.0)
+            (360.0, 164.0)
         );
     }
 

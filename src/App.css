@@ -676,6 +676,7 @@ body,
 
 .limit-status-row.status-reserveWaiting {
   --status-tone: var(--color-secondary-text);
+  height: 48px;
 }
 
 .limit-status-row.status-reserveAvailable {
@@ -685,6 +686,42 @@ body,
 .limit-status-row.status-reserveExhausted,
 .limit-status-row.status-regularExhausted {
   --status-tone: var(--color-exhaustion-danger);
+}
+
+.limit-status-row.status-reserveAvailable,
+.limit-status-row.status-reserveExhausted {
+  height: 56px;
+}
+
+.limit-status-row.status-regularExhausted {
+  height: 44px;
+}
+
+.limit-status-row {
+  display: grid;
+  padding: 5px 2px;
+  align-content: center;
+  gap: 1px;
+}
+
+.limit-status-row .pace-heading {
+  height: 16px;
+}
+
+.limit-status-summary,
+.limit-status-reset {
+  display: block;
+  overflow: hidden;
+  color: var(--status-tone);
+  font-size: 12px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.limit-status-reset {
+  color: var(--color-secondary-text);
+  font-size: 11px;
 }
 
 .short-pace-content {
