@@ -5,6 +5,7 @@ import { locale, text } from "./i18n";
 export const INITIAL_USAGE_STATE: UsageViewState = {
   connection: "starting",
   windows: [],
+  lunaReserveActive: false,
   featuredWindowId: null,
   fetchedAt: null,
   lastSuccessfulAt: null,
@@ -26,6 +27,10 @@ export function sortedWindows(windows: UsageWindow[]) {
   return [...windows].sort(compareUsageWindows);
 }
 
+export function isLunaReserve(window: UsageWindow) {
+  return window.kind === "lunaReserve";
+}
+
 export function featuredWindow(state: UsageViewState) {
   const declared = state.windows.find(
     (window) => window.id === state.featuredWindowId,
@@ -34,10 +39,15 @@ export function featuredWindow(state: UsageViewState) {
 }
 
 export function preferredCompactWindow(state: UsageViewState) {
+  const candidates = state.lunaReserveActive
+    ? state.windows.filter(
+        (window) => isLunaReserve(window) && window.remainingPercent > 0,
+      )
+    : state.windows.filter((window) => !isLunaReserve(window));
   const shortQuotaWindows = sortedWindows(
-    state.windows.filter((window) => window.windowDurationMins === 300),
+    candidates.filter((window) => window.windowDurationMins === 300),
   );
-  return shortQuotaWindows[0] ?? featuredWindow(state);
+  return shortQuotaWindows[0] ?? sortedWindows(candidates)[0] ?? null;
 }
 
 export function formatWindowDuration(

@@ -1,5 +1,5 @@
 use crate::settings::{Language, PaceSettings, SettingsStore};
-use crate::usage::{ConnectionState, UsageViewState, UsageWindow};
+use crate::usage::{is_luna_reserve, ConnectionState, UsageViewState, UsageWindow};
 use chrono::{Datelike, Local, TimeZone};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -339,6 +339,9 @@ fn coalesce_alert_records(history: &mut PaceHistoryFile) -> bool {
 fn record_samples(history: &mut PaceHistoryFile, usage: &UsageViewState, as_of: i64) -> bool {
     let mut changed = false;
     for window in &usage.windows {
+        if is_luna_reserve(window) {
+            continue;
+        }
         let Some(resets_at) = window.resets_at else {
             continue;
         };
@@ -381,6 +384,7 @@ fn calculate_state(
             usage
                 .windows
                 .iter()
+                .filter(|window| !is_luna_reserve(window))
                 .map(|window| calculate_window(window, as_of, settings, samples, None))
                 .collect()
         })
@@ -820,7 +824,14 @@ fn advance_alerts_with_language(
         return Vec::new();
     };
     let mut notifications = Vec::new();
-    for (window, pace) in usage.windows.iter().zip(&view.windows) {
+    for window in usage
+        .windows
+        .iter()
+        .filter(|window| !is_luna_reserve(window))
+    {
+        let Some(pace) = view.windows.iter().find(|pace| pace.window_id == window.id) else {
+            continue;
+        };
         let Some(resets_at) = window.resets_at else {
             continue;
         };
@@ -1032,12 +1043,14 @@ fn window_duration_label(duration_minutes: Option<i64>, language: Language) -> S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::usage::UsageWindowKind;
 
     fn weekly_window(used_percent: i32, resets_at: i64) -> UsageWindow {
         UsageWindow {
             id: "codex:weekly".to_string(),
             bucket_id: "codex".to_string(),
             bucket_label: None,
+            kind: UsageWindowKind::Regular,
             used_percent,
             remaining_percent: 100 - used_percent,
             window_duration_mins: Some(WEEK_MINUTES),
@@ -1049,6 +1062,7 @@ mod tests {
         UsageViewState {
             connection: ConnectionState::Ready,
             windows: vec![window],
+            luna_reserve_active: false,
             featured_window_id: Some("codex:weekly".to_string()),
             fetched_at: Some(as_of),
             last_successful_at: Some(as_of),
@@ -1061,6 +1075,7 @@ mod tests {
             id: format!("codex:{duration_minutes}m"),
             bucket_id: "codex".to_string(),
             bucket_label: None,
+            kind: UsageWindowKind::Regular,
             used_percent,
             remaining_percent: 100 - used_percent,
             window_duration_mins: Some(duration_minutes),
@@ -1075,6 +1090,38 @@ mod tests {
             recorded_at,
             used_percent,
         }
+    }
+
+    #[test]
+    fn luna_reserve_is_excluded_from_pace_history_and_view() {
+        let regular = weekly_window(20, WEEK_MINUTES);
+        let reserve = UsageWindow {
+            id: "gpt-reserve:primary".to_string(),
+            bucket_id: "gpt-reserve".to_string(),
+            bucket_label: None,
+            kind: UsageWindowKind::LunaReserve,
+            used_percent: 10,
+            remaining_percent: 90,
+            window_duration_mins: Some(WEEK_MINUTES),
+            resets_at: Some(WEEK_MINUTES),
+        };
+        let usage = UsageViewState {
+            connection: ConnectionState::Ready,
+            windows: vec![regular.clone(), reserve],
+            luna_reserve_active: false,
+            featured_window_id: Some(regular.id.clone()),
+            fetched_at: Some(60),
+            last_successful_at: Some(60),
+            error_message: None,
+        };
+        let mut history = PaceHistoryFile::default();
+
+        assert!(record_samples(&mut history, &usage, 60));
+        assert_eq!(history.samples.len(), 1);
+        assert_eq!(history.samples[0].window_id, regular.id);
+        let view = calculate_state(&usage, &PaceSettings::default(), &history.samples);
+        assert_eq!(view.windows.len(), 1);
+        assert_eq!(view.windows[0].window_id, "codex:weekly");
     }
 
     #[test]

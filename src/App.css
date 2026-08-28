@@ -674,6 +674,19 @@ body,
   --status-tone: var(--color-exhaustion-danger);
 }
 
+.limit-status-row.status-reserveWaiting {
+  --status-tone: var(--color-secondary-text);
+}
+
+.limit-status-row.status-reserveAvailable {
+  --status-tone: var(--color-actual);
+}
+
+.limit-status-row.status-reserveExhausted,
+.limit-status-row.status-regularExhausted {
+  --status-tone: var(--color-exhaustion-danger);
+}
+
 .short-pace-content {
   display: flex;
   min-width: 0;

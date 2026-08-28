@@ -16,6 +16,7 @@ function window(overrides: Partial<UsageWindow>): UsageWindow {
     id: "codex:primary",
     bucketId: "codex",
     bucketLabel: null,
+    kind: "regular",
     usedPercent: 20,
     remainingPercent: 80,
     windowDurationMins: 300,
@@ -28,6 +29,7 @@ function state(windows: UsageWindow[]): UsageViewState {
   return {
     connection: "ready",
     windows,
+    lunaReserveActive: false,
     featuredWindowId: null,
     fetchedAt: 1,
     lastSuccessfulAt: 1,
@@ -104,6 +106,40 @@ describe("사용량 표시 규칙", () => {
     );
     expect(preferredCompactWindow(state([weekly]))?.id).toBe("weekly");
     expect(preferredCompactWindow(state([weekly, later]))?.id).toBe("later");
+  });
+
+  it("Reserve 우선 표시에서는 남은 Luna Reserve 창을 Compact 대표로 선택한다", () => {
+    const regular = window({
+      id: "codex:primary",
+      remainingPercent: 0,
+      windowDurationMins: 300,
+    });
+    const reserve = window({
+      id: "gpt-reserve:primary",
+      bucketId: "gpt-reserve",
+      kind: "lunaReserve",
+      remainingPercent: 80,
+      windowDurationMins: 10_080,
+    });
+    const reserveFiveHours = window({
+      id: "gpt-reserve:secondary",
+      bucketId: "gpt-reserve",
+      kind: "lunaReserve",
+      remainingPercent: 60,
+      windowDurationMins: 300,
+    });
+
+    expect(
+      preferredCompactWindow({
+        ...state([regular, reserve, reserveFiveHours]),
+        lunaReserveActive: true,
+      })?.id,
+    ).toBe("gpt-reserve:secondary");
+    expect(
+      preferredCompactWindow(
+        state([{ ...regular, remainingPercent: 80 }, reserve]),
+      )?.id,
+    ).toBe("codex:primary");
   });
 
   it("고정 및 동적 지속시간 라벨을 만든다", () => {

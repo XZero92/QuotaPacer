@@ -23,7 +23,7 @@ use tauri::{
     WebviewWindow, WindowEvent, Wry,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
-use usage::{UsageViewState, UsageWindow};
+use usage::{is_luna_reserve, is_luna_reserve_active, UsageViewState, UsageWindow};
 
 struct AppState {
     usage: UsageService,
@@ -941,16 +941,25 @@ fn overlay_dimensions(size: OverlaySize, windows: &[UsageWindow]) -> (f64, f64) 
     if windows.is_empty() {
         return (360.0, 240.0);
     }
-    let short_rows = windows
-        .iter()
-        .filter(|window| {
-            window
-                .window_duration_mins
-                .and_then(|minutes| minutes.checked_mul(60))
-                .is_some_and(|seconds| seconds > 0 && seconds < 24 * 60 * 60)
-        })
-        .count() as f64;
-    let detail_rows = windows.len() as f64 - short_rows;
+    let reserve_active = is_luna_reserve_active(windows);
+    let (short_rows, detail_rows) =
+        windows
+            .iter()
+            .fold((0.0_f64, 0.0_f64), |(short, detail), window| {
+                if is_luna_reserve(window) || (reserve_active && window.remaining_percent == 0) {
+                    (short + 1.0, detail)
+                } else if reserve_active {
+                    (short, detail)
+                } else if window
+                    .window_duration_mins
+                    .and_then(|minutes| minutes.checked_mul(60))
+                    .is_some_and(|seconds| seconds > 0 && seconds < 24 * 60 * 60)
+                {
+                    (short + 1.0, detail)
+                } else {
+                    (short, detail + 1.0)
+                }
+            });
     (
         360.0,
         (16.0 + 48.0 + short_rows * 88.0 + detail_rows * 176.0).min(520.0),
@@ -1151,7 +1160,7 @@ mod tests {
         OverlayMenuPosition,
     };
     use crate::settings::{LargePlanVisualization, OverlaySize};
-    use crate::usage::UsageWindow;
+    use crate::usage::{UsageWindow, UsageWindowKind};
     use tauri::{PhysicalPosition, PhysicalSize};
 
     fn appearance(
@@ -1169,6 +1178,20 @@ mod tests {
             id: id.to_string(),
             bucket_id: "codex".to_string(),
             bucket_label: None,
+            kind: UsageWindowKind::Regular,
+            used_percent: 0,
+            remaining_percent: 100,
+            window_duration_mins: Some(duration_minutes),
+            resets_at: None,
+        }
+    }
+
+    fn reserve_window(id: &str, duration_minutes: i64) -> UsageWindow {
+        UsageWindow {
+            id: id.to_string(),
+            bucket_id: "gpt-reserve".to_string(),
+            bucket_label: None,
+            kind: UsageWindowKind::LunaReserve,
             used_percent: 0,
             remaining_percent: 100,
             window_duration_mins: Some(duration_minutes),
@@ -1288,6 +1311,26 @@ mod tests {
             (360.0, 520.0)
         );
         assert_eq!(overlay_dimensions(OverlaySize::Large, &[]), (360.0, 240.0));
+    }
+
+    #[test]
+    fn large_layout_treats_luna_reserve_and_exhausted_regular_windows_as_compact_rows() {
+        let regular = usage_window("weekly", 7 * 24 * 60);
+        let reserve = reserve_window("gpt-reserve:primary", 7 * 24 * 60);
+        assert_eq!(
+            overlay_dimensions(OverlaySize::Large, &[regular.clone(), reserve.clone()]),
+            (360.0, 328.0)
+        );
+
+        let exhausted = UsageWindow {
+            used_percent: 100,
+            remaining_percent: 0,
+            ..regular
+        };
+        assert_eq!(
+            overlay_dimensions(OverlaySize::Large, &[exhausted, reserve]),
+            (360.0, 240.0)
+        );
     }
 
     #[test]

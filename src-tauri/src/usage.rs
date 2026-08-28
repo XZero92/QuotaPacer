@@ -19,10 +19,18 @@ pub enum ConnectionState {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub enum UsageWindowKind {
+    Regular,
+    LunaReserve,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UsageWindow {
     pub id: String,
     pub bucket_id: String,
     pub bucket_label: Option<String>,
+    pub kind: UsageWindowKind,
     pub used_percent: i32,
     pub remaining_percent: i32,
     pub window_duration_mins: Option<i64>,
@@ -34,6 +42,7 @@ pub struct UsageWindow {
 pub struct UsageViewState {
     pub connection: ConnectionState,
     pub windows: Vec<UsageWindow>,
+    pub luna_reserve_active: bool,
     pub featured_window_id: Option<String>,
     pub fetched_at: Option<i64>,
     pub last_successful_at: Option<i64>,
@@ -45,6 +54,7 @@ impl UsageViewState {
         Self {
             connection: ConnectionState::Starting,
             windows: Vec::new(),
+            luna_reserve_active: false,
             featured_window_id: None,
             fetched_at: None,
             last_successful_at: None,
@@ -61,6 +71,7 @@ impl UsageViewState {
             } else {
                 ConnectionState::Ready
             },
+            luna_reserve_active: is_luna_reserve_active(&windows),
             windows,
             featured_window_id,
             fetched_at: Some(now),
@@ -82,6 +93,7 @@ impl UsageViewState {
                 connection
             },
             windows: previous.windows.clone(),
+            luna_reserve_active: previous.luna_reserve_active,
             featured_window_id: previous.featured_window_id.clone(),
             fetched_at: previous.fetched_at,
             last_successful_at: previous.last_successful_at,
@@ -137,19 +149,23 @@ pub fn normalize_rate_limits(value: serde_json::Value) -> Result<Vec<UsageWindow
 
     let mut windows = Vec::new();
     for (map_id, bucket) in buckets {
-        let bucket_id = bucket.limit_id.clone().unwrap_or(map_id);
+        // `rateLimitsByLimitId` is the only identifier guaranteed to stay distinct
+        // when a server payload reuses `limitId` for more than one bucket.
+        let kind = usage_window_kind(&map_id, &bucket);
         if let Some(window) = bucket.primary {
             windows.push(to_usage_window(
-                &bucket_id,
+                &map_id,
                 bucket.limit_name.clone(),
+                kind.clone(),
                 "primary",
                 window,
             ));
         }
         if let Some(window) = bucket.secondary {
             windows.push(to_usage_window(
-                &bucket_id,
+                &map_id,
                 bucket.limit_name.clone(),
+                kind,
                 "secondary",
                 window,
             ));
@@ -163,6 +179,7 @@ pub fn normalize_rate_limits(value: serde_json::Value) -> Result<Vec<UsageWindow
 fn to_usage_window(
     bucket_id: &str,
     bucket_label: Option<String>,
+    kind: UsageWindowKind,
     slot: &str,
     raw: RawRateLimitWindow,
 ) -> UsageWindow {
@@ -171,11 +188,43 @@ fn to_usage_window(
         id: format!("{bucket_id}:{slot}"),
         bucket_id: bucket_id.to_string(),
         bucket_label,
+        kind,
         used_percent,
         remaining_percent: 100 - used_percent,
         window_duration_mins: raw.window_duration_mins,
         resets_at: raw.resets_at,
     }
+}
+
+fn usage_window_kind(map_id: &str, bucket: &RawRateLimitBucket) -> UsageWindowKind {
+    if is_gpt_reserve_id(map_id)
+        || bucket.limit_id.as_deref().is_some_and(is_gpt_reserve_id)
+        || bucket.limit_name.as_deref().is_some_and(is_gpt_reserve_id)
+    {
+        UsageWindowKind::LunaReserve
+    } else {
+        UsageWindowKind::Regular
+    }
+}
+
+fn is_gpt_reserve_id(value: &str) -> bool {
+    value == "gpt-reserve"
+}
+
+pub fn is_luna_reserve(window: &UsageWindow) -> bool {
+    window.kind == UsageWindowKind::LunaReserve
+}
+
+/// app-server does not expose whether Luna Reserve is currently selected. This is a
+/// display-only inference: a remaining reserve window becomes preferred after any
+/// regular window is exhausted.
+pub fn is_luna_reserve_active(windows: &[UsageWindow]) -> bool {
+    windows
+        .iter()
+        .any(|window| is_luna_reserve(window) && window.remaining_percent > 0)
+        && windows
+            .iter()
+            .any(|window| !is_luna_reserve(window) && window.remaining_percent == 0)
 }
 
 fn compare_windows(left: &UsageWindow, right: &UsageWindow) -> Ordering {
@@ -300,5 +349,76 @@ mod tests {
 
         assert_eq!(windows[0].remaining_percent, 0);
         assert_eq!(windows[1].remaining_percent, 100);
+    }
+
+    #[test]
+    fn luna_reserve_is_classified_and_activated_only_after_regular_exhaustion() {
+        let windows = normalize_rate_limits(json!({
+            "rateLimitsByLimitId": {
+                "codex": {
+                    "primary": { "usedPercent": 100, "windowDurationMins": 300 },
+                    "secondary": { "usedPercent": 20, "windowDurationMins": 10080 }
+                },
+                "gpt-reserve": {
+                    "limitId": "codex",
+                    "limitName": "gpt-reserve",
+                    "primary": { "usedPercent": 10, "windowDurationMins": 10080 },
+                    "secondary": { "usedPercent": 50, "windowDurationMins": 300 }
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            windows
+                .iter()
+                .filter(|window| is_luna_reserve(window))
+                .count(),
+            2
+        );
+        assert!(is_luna_reserve_active(&windows));
+        assert!(UsageViewState::successful(windows.clone()).luna_reserve_active);
+        assert!(windows
+            .iter()
+            .filter(|window| is_luna_reserve(window))
+            .all(|window| window.id.starts_with("gpt-reserve:")));
+    }
+
+    #[test]
+    fn luna_reserve_stays_inactive_without_remaining_reserve_or_regular_exhaustion() {
+        let regular_remaining = normalize_rate_limits(json!({
+            "rateLimitsByLimitId": {
+                "codex": { "primary": { "usedPercent": 90 } },
+                "gpt-reserve": { "primary": { "usedPercent": 10 } }
+            }
+        }))
+        .unwrap();
+        let reserve_exhausted = normalize_rate_limits(json!({
+            "rateLimitsByLimitId": {
+                "codex": { "primary": { "usedPercent": 100 } },
+                "gpt-reserve": { "primary": { "usedPercent": 100 } }
+            }
+        }))
+        .unwrap();
+
+        assert!(!is_luna_reserve_active(&regular_remaining));
+        assert!(!is_luna_reserve_active(&reserve_exhausted));
+    }
+
+    #[test]
+    fn luna_reserve_can_be_identified_by_limit_name_when_the_map_key_is_opaque() {
+        let windows = normalize_rate_limits(json!({
+            "rateLimitsByLimitId": {
+                "server-assigned-reserve": {
+                    "limitId": "codex",
+                    "limitName": "gpt-reserve",
+                    "primary": { "usedPercent": 10, "windowDurationMins": 10080 }
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(windows[0].bucket_id, "server-assigned-reserve");
+        assert!(is_luna_reserve(&windows[0]));
     }
 }

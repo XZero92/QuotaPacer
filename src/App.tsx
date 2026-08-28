@@ -36,6 +36,7 @@ import {
   formatCompactWindowDuration,
   formatWindowDuration,
   INITIAL_USAGE_STATE,
+  isLunaReserve,
   preferredCompactWindow,
   sortedWindows,
   staleAgeLabel,
@@ -125,6 +126,7 @@ function cliActionErrorMessage(error: unknown, language: Language) {
 
 function windowLabel(window: UsageWindow, language: Language) {
   const duration = formatWindowDuration(window.windowDurationMins, language);
+  if (isLunaReserve(window)) return `Luna Reserve · ${duration}`;
   return window.bucketLabel ? `${duration} · ${window.bucketLabel}` : duration;
 }
 
@@ -497,7 +499,7 @@ function SmallOverlay({
         <strong>{featured.remainingPercent}%</strong>
       </div>
       <div className="small-copy">
-        <strong>Codex</strong>
+        <strong>{isLunaReserve(featured) ? "Luna Reserve" : "Codex"}</strong>
         <small>
           {short ? compactDurationLabel : durationLabel}
           {!short && usage.connection === "stale"
@@ -1530,6 +1532,89 @@ function ShortPaceRow({
   );
 }
 
+function LimitStatusRow({
+  window,
+  status,
+}: {
+  window: UsageWindow;
+  status:
+    | "reserveWaiting"
+    | "reserveAvailable"
+    | "reserveExhausted"
+    | "regularExhausted";
+}) {
+  const language = useLanguage();
+  const reserve = isLunaReserve(window);
+  const summary =
+    status === "reserveWaiting"
+      ? text(
+          language,
+          "일반 한도 소진 후 사용 가능 · Luna 전용",
+          "Available after regular usage is exhausted · Luna only",
+        )
+      : status === "reserveAvailable"
+        ? text(
+            language,
+            "Luna Reserve 사용 가능 · Luna 전용",
+            "Luna Reserve available · Luna only",
+          )
+        : status === "reserveExhausted"
+          ? text(language, "Luna Reserve 소진", "Luna Reserve exhausted")
+          : text(language, "일반 한도 소진", "Regular usage exhausted");
+  const context = text(
+    language,
+    `${formatResetTime(window.resetsAt, language)} 초기화`,
+    `Resets ${formatResetTime(window.resetsAt, language)}`,
+  );
+  const label = reserve
+    ? windowLabel(window, language)
+    : formatWindowDuration(window.windowDurationMins, language);
+
+  return (
+    <article
+      className={`short-pace-row limit-status-row status-${status}`}
+      aria-label={text(
+        language,
+        `${label}, ${window.remainingPercent}% 남음. ${summary}. ${context}.`,
+        `${label}, ${window.remainingPercent}% remaining. ${summary}. ${context}.`,
+      )}
+    >
+      <div className="pace-heading">
+        <strong className="window-label">{label}</strong>
+        <span
+          className={`pace-remaining tone-text-${usageTone(window.remainingPercent)}`}
+        >
+          {text(
+            language,
+            `${window.remainingPercent}% 남음`,
+            `${window.remainingPercent}% remaining`,
+          )}
+        </span>
+      </div>
+      <div className="short-pace-content">
+        <span className="short-pace-verdict">
+          <strong>{summary}</strong>
+        </span>
+        <small>{context}</small>
+      </div>
+      <div
+        className="short-capacity-meter"
+        role="img"
+        aria-label={text(
+          language,
+          `남은 용량 ${window.remainingPercent}%`,
+          `${window.remainingPercent}% capacity remaining`,
+        )}
+      >
+        <span
+          className={`tone-${usageTone(window.remainingPercent)}`}
+          style={{ width: `${window.remainingPercent}%` }}
+        />
+      </div>
+    </article>
+  );
+}
+
 function PaceRow({
   window,
   pace,
@@ -1616,12 +1701,25 @@ function LargeOverlay({
 }) {
   const language = useLanguage();
   const windows = useMemo(() => sortedWindows(usage.windows), [usage.windows]);
+  const visibleWindows = useMemo(
+    () =>
+      usage.lunaReserveActive
+        ? windows.filter(
+            (window) => isLunaReserve(window) || window.remainingPercent === 0,
+          )
+        : windows,
+    [usage.lunaReserveActive, windows],
+  );
   const paceByWindow = useMemo(
     () => new Map(pace.windows.map((window) => [window.windowId, window])),
     [pace.windows],
   );
-  const canTogglePlanVisualization = windows.some((window) =>
-    canUseWeeklyAllocation(paceByWindow.get(window.id)),
+  const canTogglePlanVisualization = visibleWindows.some(
+    (window) =>
+      !isLunaReserve(window) &&
+      !isShortWindow(window) &&
+      !(usage.lunaReserveActive && window.remainingPercent === 0) &&
+      canUseWeeklyAllocation(paceByWindow.get(window.id)),
   );
   const currentVisualizationLabel =
     planVisualization === "deviation"
@@ -1726,8 +1824,26 @@ function LargeOverlay({
         </div>
       </header>
       <div className="pace-rows">
-        {windows.map((window) =>
-          isShortWindow(window) ? (
+        {visibleWindows.map((window) =>
+          isLunaReserve(window) ? (
+            <LimitStatusRow
+              key={window.id}
+              window={window}
+              status={
+                usage.lunaReserveActive
+                  ? window.remainingPercent > 0
+                    ? "reserveAvailable"
+                    : "reserveExhausted"
+                  : "reserveWaiting"
+              }
+            />
+          ) : usage.lunaReserveActive && window.remainingPercent === 0 ? (
+            <LimitStatusRow
+              key={window.id}
+              window={window}
+              status="regularExhausted"
+            />
+          ) : isShortWindow(window) ? (
             <ShortPaceRow
               key={window.id}
               window={window}
@@ -1777,11 +1893,12 @@ function App() {
     () =>
       usage.windows
         .map(
-          (window) => `${window.id}:${window.windowDurationMins ?? "unknown"}`,
+          (window) =>
+            `${window.id}:${window.kind}:${window.windowDurationMins ?? "unknown"}:${window.remainingPercent === 0 ? "exhausted" : "remaining"}`,
         )
         .sort()
-        .join("|"),
-    [usage.windows],
+        .join("|") + `:${usage.lunaReserveActive ? "reserve" : "regular"}`,
+    [usage.lunaReserveActive, usage.windows],
   );
 
   const applyAppearanceUpdate = useCallback(

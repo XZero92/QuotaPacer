@@ -9,10 +9,13 @@ export type ConnectionState =
   | "unsupported_auth"
   | "error";
 
+export type UsageWindowKind = "regular" | "lunaReserve";
+
 export interface UsageWindow {
   id: string;
   bucketId: string;
   bucketLabel: string | null;
+  kind: UsageWindowKind;
   usedPercent: number;
   remainingPercent: number;
   windowDurationMins: number | null;
@@ -22,6 +25,7 @@ export interface UsageWindow {
 export interface UsageViewState {
   connection: ConnectionState;
   windows: UsageWindow[];
+  lunaReserveActive: boolean;
   featuredWindowId: string | null;
   fetchedAt: number | null;
   lastSuccessfulAt: number | null;

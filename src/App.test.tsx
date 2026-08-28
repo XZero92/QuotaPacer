@@ -42,12 +42,14 @@ const weeklyOnly: UsageViewState = {
       id: "codex:primary",
       bucketId: "codex",
       bucketLabel: null,
+      kind: "regular",
       usedPercent: 26,
       remainingPercent: 74,
       windowDurationMins: 10_080,
       resetsAt: 1_000_000,
     },
   ],
+  lunaReserveActive: false,
   featuredWindowId: "codex:primary",
   fetchedAt: 649_216,
   lastSuccessfulAt: 649_216,
@@ -86,6 +88,7 @@ const fiveHourWindow = {
   id: "codex:five-hours",
   bucketId: "codex",
   bucketLabel: null,
+  kind: "regular" as const,
   usedPercent: 20,
   remainingPercent: 80,
   windowDurationMins: 300,
@@ -127,6 +130,7 @@ function shortPace(
 const cliMissing: UsageViewState = {
   connection: "cli_missing",
   windows: [],
+  lunaReserveActive: false,
   featuredWindowId: null,
   fetchedAt: null,
   lastSuccessfulAt: null,
@@ -595,6 +599,7 @@ describe("Codex 사용량 오버레이", () => {
           id: "codex:secondary",
           bucketId: "codex",
           bucketLabel: null,
+          kind: "regular",
           usedPercent: 60,
           remainingPercent: 40,
           windowDurationMins: 300,
@@ -675,6 +680,113 @@ describe("Codex 사용량 오버레이", () => {
       }),
     );
   });
+
+  it("large는 비활성 Luna Reserve를 페이스 없는 보조 행으로 표시한다", async () => {
+    const reserve = {
+      id: "gpt-reserve:primary",
+      bucketId: "gpt-reserve",
+      bucketLabel: null,
+      kind: "lunaReserve" as const,
+      usedPercent: 20,
+      remainingPercent: 80,
+      windowDurationMins: 10_080,
+      resetsAt: 1_100_000,
+    };
+    mockStartup("large", {
+      ...weeklyOnly,
+      windows: [weeklyOnly.windows[0], reserve],
+    });
+    const { container } = render(<App />);
+
+    expect(
+      await screen.findByText("일반 한도 소진 후 사용 가능 · Luna 전용"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Luna Reserve · 주간")).toBeInTheDocument();
+    expect(container.querySelectorAll(".limit-status-row")).toHaveLength(1);
+    expect(container.querySelectorAll(".pace-row")).toHaveLength(1);
+    expect(
+      screen
+        .getByText("일반 한도 소진 후 사용 가능 · Luna 전용")
+        .closest(".limit-status-row")
+        ?.querySelector(".forecast-timeline"),
+    ).toBeNull();
+  });
+
+  it("Reserve 우선 표시는 Large에서 Reserve와 소진 일반 창만 간결히 남긴다", async () => {
+    const exhausted = {
+      ...weeklyOnly.windows[0],
+      id: "codex:five-hours",
+      usedPercent: 100,
+      remainingPercent: 0,
+      windowDurationMins: 300,
+    };
+    const stillRemaining = {
+      ...weeklyOnly.windows[0],
+      id: "codex:weekly",
+      remainingPercent: 74,
+    };
+    const reserve = {
+      id: "gpt-reserve:primary",
+      bucketId: "gpt-reserve",
+      bucketLabel: null,
+      kind: "lunaReserve" as const,
+      usedPercent: 20,
+      remainingPercent: 80,
+      windowDurationMins: 10_080,
+      resetsAt: 1_100_000,
+    };
+    mockStartup(
+      "large",
+      {
+        ...weeklyOnly,
+        windows: [exhausted, stillRemaining, reserve],
+        lunaReserveActive: true,
+      },
+      weeklyPace,
+    );
+    const { container } = render(<App />);
+
+    expect(
+      await screen.findByText("Luna Reserve 사용 가능 · Luna 전용"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("일반 한도 소진")).toBeInTheDocument();
+    expect(screen.queryByText("현재 페이스 유지 가능")).not.toBeInTheDocument();
+    expect(container.querySelectorAll(".limit-status-row")).toHaveLength(2);
+    expect(container.querySelectorAll(".pace-row")).toHaveLength(0);
+    expect(
+      screen.queryByRole("button", { name: /현재 7일 계획 표시/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each(["small", "middle"] as const)(
+    "%s은 Reserve 우선 표시에서 Luna Reserve를 대표 창으로 표시한다",
+    async (size) => {
+      const exhausted = {
+        ...fiveHourWindow,
+        usedPercent: 100,
+        remainingPercent: 0,
+      };
+      const reserve = {
+        id: "gpt-reserve:primary",
+        bucketId: "gpt-reserve",
+        bucketLabel: null,
+        kind: "lunaReserve" as const,
+        usedPercent: 20,
+        remainingPercent: 80,
+        windowDurationMins: 10_080,
+        resetsAt: 1_100_000,
+      };
+      mockStartup(size, {
+        ...weeklyOnly,
+        windows: [exhausted, reserve],
+        lunaReserveActive: true,
+      });
+      render(<App />);
+
+      expect(await screen.findByText(/Luna Reserve/)).toBeInTheDocument();
+      expect(screen.getAllByLabelText(/80% 남음/).length).toBeGreaterThan(0);
+    },
+  );
 
   it("주간 배분 선택은 7일 제한에만 적용하고 단기 창에는 계획 시각화를 만들지 않는다", async () => {
     const secondary = {
