@@ -22,6 +22,7 @@ use tauri::{
     Emitter, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State,
     WebviewWindow, WindowEvent, Wry,
 };
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use usage::{UsageViewState, UsageWindow};
 
 struct AppState {
@@ -69,6 +70,7 @@ struct OverlayAppearanceUpdate {
 struct SettingsSession {
     session_id: u64,
     settings: EditableSettings,
+    launch_at_login: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -395,6 +397,7 @@ fn begin_settings_session(
     state: State<'_, AppState>,
 ) -> Result<SettingsSession, String> {
     let settings = state.settings.editable_settings();
+    let launch_at_login = launch_at_login_state(&app)?;
     let persisted_appearance = OverlayAppearance::from(state.settings.overlay_appearance());
     let (session_id, reverted) = state
         .appearance_preview
@@ -408,7 +411,57 @@ fn begin_settings_session(
     Ok(SettingsSession {
         session_id,
         settings,
+        launch_at_login,
     })
+}
+
+fn launch_at_login_state(app: &tauri::AppHandle) -> Result<bool, String> {
+    app.autolaunch()
+        .is_enabled()
+        .map_err(|error| format!("자동 시작 상태를 확인할 수 없습니다: {error}"))
+}
+
+fn apply_launch_at_login_change<Enable, Disable>(
+    current: bool,
+    desired: bool,
+    enable: Enable,
+    disable: Disable,
+) -> Result<bool, String>
+where
+    Enable: FnOnce() -> Result<(), String>,
+    Disable: FnOnce() -> Result<(), String>,
+{
+    if current == desired {
+        return Ok(false);
+    }
+    if desired {
+        enable()?;
+    } else {
+        disable()?;
+    }
+    Ok(true)
+}
+
+fn update_launch_at_login(
+    app: &tauri::AppHandle,
+    current: bool,
+    desired: bool,
+) -> Result<bool, String> {
+    let manager = app.autolaunch();
+    apply_launch_at_login_change(
+        current,
+        desired,
+        || {
+            manager
+                .enable()
+                .map_err(|error| format!("자동 시작을 등록할 수 없습니다: {error}"))
+        },
+        || {
+            manager
+                .disable()
+                .map_err(|error| format!("자동 시작 등록을 해제할 수 없습니다: {error}"))
+        },
+    )
 }
 
 #[tauri::command]
@@ -475,6 +528,7 @@ fn set_large_plan_visualization(
 fn save_editable_settings(
     session_id: u64,
     settings: EditableSettings,
+    launch_at_login: bool,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     menus: State<'_, OverlayMenus>,
@@ -486,9 +540,50 @@ fn save_editable_settings(
     if !preview.is_active(session_id) {
         return Err("설정 세션이 만료되었습니다. 설정 창을 다시 열어주세요.".to_string());
     }
+    settings.validate()?;
     let previous_pace_settings = state.settings.pace_settings();
     let previous_language = state.settings.language();
-    let saved = state.settings.set_editable_settings(settings)?;
+    let previous_launch_at_login = launch_at_login_state(&app)?;
+    let launch_at_login_changed =
+        update_launch_at_login(&app, previous_launch_at_login, launch_at_login)?;
+    let applied_launch_at_login = match launch_at_login_state(&app) {
+        Ok(applied) if applied == launch_at_login => applied,
+        Ok(applied) => {
+            let rollback = launch_at_login_changed
+                .then(|| update_launch_at_login(&app, applied, previous_launch_at_login));
+            return match rollback {
+                Some(Err(rollback_error)) => Err(format!(
+                    "자동 시작 상태가 요청한 값으로 적용되지 않았고 복원에도 실패했습니다: {rollback_error}"
+                )),
+                _ => Err("자동 시작 상태가 요청한 값으로 적용되지 않았습니다.".to_string()),
+            };
+        }
+        Err(read_error) => {
+            let rollback = launch_at_login_changed
+                .then(|| update_launch_at_login(&app, launch_at_login, previous_launch_at_login));
+            return match rollback {
+                Some(Err(rollback_error)) => Err(format!(
+                    "{read_error} 이전 자동 시작 상태도 복원하지 못했습니다: {rollback_error}"
+                )),
+                _ => Err(read_error),
+            };
+        }
+    };
+    let saved = match state.settings.set_editable_settings(settings) {
+        Ok(saved) => saved,
+        Err(save_error) => {
+            if launch_at_login_changed {
+                if let Err(rollback_error) =
+                    update_launch_at_login(&app, launch_at_login, previous_launch_at_login)
+                {
+                    return Err(format!(
+                        "{save_error} 자동 시작 상태도 복원하지 못했습니다: {rollback_error}"
+                    ));
+                }
+            }
+            return Err(save_error);
+        }
+    };
     let saved_appearance = OverlayAppearance::from(state.settings.overlay_appearance());
     let (next_session_id, update) = preview
         .commit_and_restart(session_id, saved_appearance)
@@ -509,6 +604,7 @@ fn save_editable_settings(
     Ok(SettingsSession {
         session_id: next_session_id,
         settings: saved,
+        launch_at_login: applied_launch_at_login,
     })
 }
 
@@ -583,6 +679,10 @@ fn set_overlay_layout(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_single_instance::init(
             |app, _arguments, _cwd| {
                 show_main_window(app);
@@ -1045,9 +1145,10 @@ fn show_settings_window(app: &tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        anchored_position, is_pace_settings_menu_id, overlay_dimensions, overlay_size_from_menu_id,
-        validated_overlay_menu_position, OverlayAppearance, OverlayAppearancePhase,
-        OverlayAppearancePreviewController, OverlayMenuPosition,
+        anchored_position, apply_launch_at_login_change, is_pace_settings_menu_id,
+        overlay_dimensions, overlay_size_from_menu_id, validated_overlay_menu_position,
+        OverlayAppearance, OverlayAppearancePhase, OverlayAppearancePreviewController,
+        OverlayMenuPosition,
     };
     use crate::settings::{LargePlanVisualization, OverlaySize};
     use crate::usage::UsageWindow;
@@ -1073,6 +1174,66 @@ mod tests {
             window_duration_mins: Some(duration_minutes),
             resets_at: None,
         }
+    }
+
+    #[test]
+    fn launch_at_login_change_runs_only_the_required_os_action() {
+        let mut enabled = 0;
+        let mut disabled = 0;
+
+        assert!(!apply_launch_at_login_change(
+            false,
+            false,
+            || {
+                enabled += 1;
+                Ok(())
+            },
+            || {
+                disabled += 1;
+                Ok(())
+            },
+        )
+        .unwrap());
+        assert_eq!((enabled, disabled), (0, 0));
+
+        assert!(apply_launch_at_login_change(
+            false,
+            true,
+            || {
+                enabled += 1;
+                Ok(())
+            },
+            || {
+                disabled += 1;
+                Ok(())
+            },
+        )
+        .unwrap());
+        assert_eq!((enabled, disabled), (1, 0));
+
+        assert!(apply_launch_at_login_change(
+            true,
+            false,
+            || {
+                enabled += 1;
+                Ok(())
+            },
+            || {
+                disabled += 1;
+                Ok(())
+            },
+        )
+        .unwrap());
+        assert_eq!((enabled, disabled), (1, 1));
+    }
+
+    #[test]
+    fn launch_at_login_change_surfaces_registration_failures() {
+        let error =
+            apply_launch_at_login_change(false, true, || Err("등록 실패".to_string()), || Ok(()))
+                .unwrap_err();
+
+        assert_eq!(error, "등록 실패");
     }
 
     #[test]

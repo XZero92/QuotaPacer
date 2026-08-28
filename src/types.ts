@@ -90,6 +90,7 @@ export interface EditableSettings {
 export interface SettingsSession {
   sessionId: number;
   settings: EditableSettings;
+  launchAtLogin: boolean;
 }
 
 export interface OverlayAppearance {

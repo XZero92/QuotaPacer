@@ -17,6 +17,7 @@ Product principles and established technical and UX decisions are documented in 
 - Inline warnings and optional OS notifications for confirmed risks
 - Periodic and event-driven refresh, retention of the last value during disconnection, and automatic reconnection
 - Drag positioning and persistence of opacity, language, pace, and window settings
+- Optional automatic launch of QuotaPacer and its overlay at system login
 - Size, Settings, refresh, hide, and quit actions from the tray and overlay menus
 - Automatic Codex CLI discovery with direct executable selection when discovery fails
 
@@ -61,6 +62,7 @@ The app does not read or store Codex authentication tokens or account email addr
 
 - The transparent macOS window uses Tauri's private API, so the current configuration is not eligible for Mac App Store distribution.
 - Always-on-top, focus, transparency, and window positioning on Linux can vary between X11, Wayland, and desktop environments.
+- Autostart uses the operating system's login entry and must be verified with an actual login using each distribution package.
 - OS notifications and multi-monitor and DPI behavior require manual verification on each platform.
 
 ## License

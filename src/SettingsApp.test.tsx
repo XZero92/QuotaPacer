@@ -91,6 +91,7 @@ describe("설정 창", () => {
           return Promise.resolve({
             sessionId: mocks.sessionId,
             settings: savedSettings,
+            launchAtLogin: false,
           });
         }
         if (command === "save_editable_settings") {
@@ -98,6 +99,7 @@ describe("설정 창", () => {
           return Promise.resolve({
             sessionId: mocks.sessionId,
             settings: args?.settings,
+            launchAtLogin: args?.launchAtLogin,
           });
         }
         return Promise.resolve();
@@ -295,9 +297,45 @@ describe("설정 창", () => {
             weekdayWeights: [8, 8, 8, 8, 8, 5, 5],
           }),
         }),
+        launchAtLogin: false,
       }),
     );
     expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
+  });
+
+  it("로그인 시 자동 실행을 저장 전 초안으로 유지하고 함께 확정한다", async () => {
+    await renderLoadedSettings();
+    const launchAtLogin = screen.getByLabelText("로그인 시 자동 실행 사용");
+
+    expect(launchAtLogin).not.toBeChecked();
+    fireEvent.click(launchAtLogin);
+    expect(screen.getByRole("button", { name: "저장" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "저장" }));
+
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith("save_editable_settings", {
+        sessionId: 1,
+        settings: savedSettings,
+        launchAtLogin: true,
+      }),
+    );
+    expect(launchAtLogin).toBeChecked();
+    expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
+  });
+
+  it("로그인 시 자동 실행 초안을 폐기하면 기존 상태로 복원한다", async () => {
+    await renderLoadedSettings();
+    const launchAtLogin = screen.getByLabelText("로그인 시 자동 실행 사용");
+
+    fireEvent.click(launchAtLogin);
+    fireEvent.click(screen.getByRole("button", { name: "설정 닫기" }));
+    fireEvent.click(screen.getByRole("button", { name: "변경사항 폐기" }));
+
+    await waitFor(() => expect(launchAtLogin).not.toBeChecked());
+    expect(mocks.invoke).not.toHaveBeenCalledWith(
+      "save_editable_settings",
+      expect.anything(),
+    );
   });
 
   it("알림 권한 거부 시 인라인 경고를 유지한다고 안내한다", async () => {
@@ -529,6 +567,7 @@ describe("설정 창", () => {
       expect(mocks.invoke).toHaveBeenCalledWith("save_editable_settings", {
         sessionId: 1,
         settings: expect.objectContaining({ language: "en" }),
+        launchAtLogin: false,
       }),
     );
     expect(document.documentElement).toHaveAttribute("lang", "en");

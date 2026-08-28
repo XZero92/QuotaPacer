@@ -131,6 +131,8 @@ function SettingsApp() {
     DEFAULT_EDITABLE_SETTINGS,
   );
   const [draftSettings, setDraftSettings] = useState(DEFAULT_EDITABLE_SETTINGS);
+  const [persistedLaunchAtLogin, setPersistedLaunchAtLogin] = useState(false);
+  const [draftLaunchAtLogin, setDraftLaunchAtLogin] = useState(false);
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [permission, setPermission] = useState<PermissionStatus>("checking");
   const [message, setMessage] = useState("");
@@ -175,7 +177,9 @@ function SettingsApp() {
         (weight, index) => weight === paceSettings.weekdayWeights[index],
       ),
   )?.[0];
-  const dirty = !settingsEqual(persistedSettings, draftSettings);
+  const dirty =
+    !settingsEqual(persistedSettings, draftSettings) ||
+    persistedLaunchAtLogin !== draftLaunchAtLogin;
   const formBusy = saving || requestingPermission;
   const selectedLanguageIndex = Math.max(
     0,
@@ -224,6 +228,7 @@ function SettingsApp() {
     (session: SettingsSession) => {
       cancelScheduledPreview();
       hideOpacityTooltip();
+      const launchAtLogin = session.launchAtLogin ?? false;
       const recovered = !weekdayWeightsValid(
         session.settings.paceSettings.weekdayWeights,
       );
@@ -243,6 +248,8 @@ function SettingsApp() {
       setSessionId(session.sessionId);
       setPersistedSettings(session.settings);
       setDraftSettings(recoveredSettings);
+      setPersistedLaunchAtLogin(launchAtLogin);
+      setDraftLaunchAtLogin(launchAtLogin);
       setCloseDialogOpen(false);
       setLanguageListboxOpen(false);
       setActiveLanguageIndex(
@@ -386,13 +393,19 @@ function SettingsApp() {
       sessionIdRef.current = null;
       setSessionId(null);
       setDraftSettings(persistedSettings);
+      setDraftLaunchAtLogin(persistedLaunchAtLogin);
       setCloseDialogOpen(false);
       setMessage("");
       await getCurrentWindow().hide();
     } catch (error) {
       setMessage(String(error));
     }
-  }, [cancelScheduledPreview, hideOpacityTooltip, persistedSettings]);
+  }, [
+    cancelScheduledPreview,
+    hideOpacityTooltip,
+    persistedLaunchAtLogin,
+    persistedSettings,
+  ]);
 
   const requestClose = useCallback(() => {
     if (formBusy) {
@@ -612,6 +625,7 @@ function SettingsApp() {
       const session = await invoke<SettingsSession>("save_editable_settings", {
         sessionId: activeSessionId,
         settings: draftSettings,
+        launchAtLogin: draftLaunchAtLogin,
       });
       applySession(session);
       setMessage(
@@ -795,6 +809,40 @@ function SettingsApp() {
                 </div>
               )}
             </div>
+          </div>
+        </section>
+
+        <section>
+          <div className="setting-row">
+            <div>
+              <h2>
+                {text(language, "로그인 시 자동 실행", "Launch at login")}
+              </h2>
+              <p className="section-help">
+                {text(
+                  language,
+                  "시스템에 로그인하면 QuotaPacer와 오버레이를 자동으로 시작합니다.",
+                  "Automatically starts QuotaPacer and its overlay when you sign in to the system.",
+                )}
+              </p>
+            </div>
+            <label className="switch">
+              <input
+                type="checkbox"
+                aria-label={text(
+                  language,
+                  "로그인 시 자동 실행 사용",
+                  "Launch QuotaPacer at login",
+                )}
+                checked={draftLaunchAtLogin}
+                disabled={formBusy || sessionId === null}
+                onChange={(event) => {
+                  setDraftLaunchAtLogin(event.target.checked);
+                  setMessage("");
+                }}
+              />
+              <span />
+            </label>
           </div>
         </section>
 
