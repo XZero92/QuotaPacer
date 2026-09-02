@@ -22,7 +22,7 @@ use tauri::{
     Emitter, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State,
     WebviewWindow, WindowEvent, Wry,
 };
-use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
+use tauri_plugin_autostart::{Builder as AutostartBuilder, ManagerExt};
 use usage::{is_luna_reserve, is_luna_reserve_active, UsageViewState, UsageWindow};
 
 struct AppState {
@@ -679,10 +679,7 @@ fn set_overlay_layout(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_autostart::init(
-            MacosLauncher::LaunchAgent,
-            None,
-        ))
+        .plugin(AutostartBuilder::new().app_name("QuotaPacer").build())
         .plugin(tauri_plugin_single_instance::init(
             |app, _arguments, _cwd| {
                 show_main_window(app);
