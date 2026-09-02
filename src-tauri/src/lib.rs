@@ -1061,7 +1061,9 @@ fn install_window_handlers(window: &WebviewWindow) {
                 let _ = window_for_event.hide();
             }
         }
-        WindowEvent::Moved(position) => {
+        WindowEvent::Moved(position)
+            if should_persist_window_position(window_for_event.is_minimized().unwrap_or(false)) =>
+        {
             if let Some(state) = handle.try_state::<AppState>() {
                 let _ = state.settings.set_window_position(StoredPosition {
                     x: position.x,
@@ -1124,20 +1126,37 @@ fn position_window(window: &WebviewWindow, settings: &SettingsStore) {
 
 fn toggle_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        if window.is_visible().unwrap_or(false) {
+        let is_visible = window.is_visible().unwrap_or(false);
+        let is_minimized = window.is_minimized().unwrap_or(false);
+        if should_hide_main_window(is_visible, is_minimized) {
             let _ = window.hide();
         } else {
-            let _ = window.show();
-            let _ = window.set_focus();
+            reveal_main_window(app, &window);
         }
     }
 }
 
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
+        reveal_main_window(app, &window);
     }
+}
+
+fn reveal_main_window(app: &tauri::AppHandle, window: &WebviewWindow) {
+    let _ = window.show();
+    let _ = window.unminimize();
+    if let Some(state) = app.try_state::<AppState>() {
+        position_window(window, &state.settings);
+    }
+    let _ = window.set_focus();
+}
+
+fn should_hide_main_window(is_visible: bool, is_minimized: bool) -> bool {
+    is_visible && !is_minimized
+}
+
+fn should_persist_window_position(is_minimized: bool) -> bool {
+    !is_minimized
 }
 
 fn show_settings_window(app: &tauri::AppHandle) {
@@ -1156,9 +1175,9 @@ fn show_settings_window(app: &tauri::AppHandle) {
 mod tests {
     use super::{
         anchored_position, apply_launch_at_login_change, is_pace_settings_menu_id,
-        overlay_dimensions, overlay_size_from_menu_id, validated_overlay_menu_position,
-        OverlayAppearance, OverlayAppearancePhase, OverlayAppearancePreviewController,
-        OverlayMenuPosition,
+        overlay_dimensions, overlay_size_from_menu_id, should_hide_main_window,
+        should_persist_window_position, validated_overlay_menu_position, OverlayAppearance,
+        OverlayAppearancePhase, OverlayAppearancePreviewController, OverlayMenuPosition,
     };
     use crate::settings::{LargePlanVisualization, OverlaySize};
     use crate::usage::{UsageWindow, UsageWindowKind};
@@ -1510,5 +1529,18 @@ mod tests {
         );
 
         assert_eq!(position, PhysicalPosition::new(-1920, 0));
+    }
+
+    #[test]
+    fn minimized_overlay_is_revealed_instead_of_hidden() {
+        assert!(!should_hide_main_window(true, true));
+        assert!(!should_hide_main_window(false, false));
+        assert!(should_hide_main_window(true, false));
+    }
+
+    #[test]
+    fn minimized_overlay_position_is_not_persisted() {
+        assert!(!should_persist_window_position(true));
+        assert!(should_persist_window_position(false));
     }
 }
