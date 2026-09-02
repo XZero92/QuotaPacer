@@ -38,7 +38,7 @@ import {
   INITIAL_USAGE_STATE,
   isLunaReserve,
   preferredCompactWindow,
-  sortedWindows,
+  sortedLargeWindows,
   staleAgeLabel,
   staleLabel,
   usageTone,
@@ -1687,7 +1687,10 @@ function LargeOverlay({
   onOpenMenu: (position: OverlayMenuPosition) => void;
 }) {
   const language = useLanguage();
-  const windows = useMemo(() => sortedWindows(usage.windows), [usage.windows]);
+  const windows = useMemo(
+    () => sortedLargeWindows(usage.windows),
+    [usage.windows],
+  );
   const visibleWindows = useMemo(
     () =>
       usage.lunaReserveActive

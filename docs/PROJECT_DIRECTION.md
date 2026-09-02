@@ -81,7 +81,7 @@ QuotaPacer는 Codex 사용량을 화면 위의 작은 오버레이로 보여주�
 - `primary = 5시간`, `secondary = 주간` 같은 의미를 고정하지 않음
 - 300분은 `5시간`, 10080분은 `주간`, 다른 값은 실제 지속시간으로 동적 표기
 - Small·Middle의 Compact 대표 창은 300분 창이 있으면 항상 그중 하나를 선택하고, 없으면 기존 대표 창으로 대체
-- 같은 후보군에서는 남은 비율, 빠른 리셋, 짧은 지속시간, ID 사전순으로 선택하며 `planType`, `primary`, `secondary`는 선택 근거로 사용하지 않음
+- Small·Middle의 같은 Compact 후보군에서는 남은 비율, 빠른 리셋, 짧은 지속시간, ID 사전순으로 선택하며 `planType`, `primary`, `secondary`는 선택 근거로 사용하지 않음. Large의 일반 창은 기간이 짧은 순으로 먼저 표시하고, 같은 기간에서만 남은 비율·빠른 리셋·ID 사전순을 적용한다. 기간이 없는 일반 창은 마지막에 두며 비활성 Luna Reserve 보조 행도 일반 창 뒤에 둠
 - `rateLimitsByLimitId`의 키, `limitId`, `limitName` 중 하나가 정확히 `gpt-reserve`이면 Luna Reserve로 분류. 맵 키는 창 ID로 보존해 다른 버킷과 `limitId`가 겹쳐도 창을 합치지 않음. Reserve 창에 잔여량이 있고 일반 창 하나가 0%이면 app-server가 별도 활성 상태를 제공하지 않는 한계 안에서 Reserve 우선 표시로 추론하며, Small·Middle은 Reserve를 대표로 표시
 - Reserve가 우선이 아니면 Compact 후보에서 제외하고 Large에 `일반 한도 소진 후 사용 가능 · Luna 전용` 48px 보조 행으로 표시. Reserve 우선 표시 중에는 잔여 Reserve를 56px, 0% 일반 창을 44px 상태 행으로만 표시
 - 남은 비율이 50% 초과면 기본색, 20~50%면 주의색, 20% 미만이면 위험색

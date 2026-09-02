@@ -31,6 +31,25 @@ export function isLunaReserve(window: UsageWindow) {
   return window.kind === "lunaReserve";
 }
 
+function largeWindowDuration(window: UsageWindow) {
+  return window.windowDurationMins ?? Number.MAX_SAFE_INTEGER;
+}
+
+function compareLargeRegularWindows(left: UsageWindow, right: UsageWindow) {
+  return (
+    largeWindowDuration(left) - largeWindowDuration(right) ||
+    compareUsageWindows(left, right)
+  );
+}
+
+export function sortedLargeWindows(windows: UsageWindow[]) {
+  const regular = windows
+    .filter((window) => !isLunaReserve(window))
+    .sort(compareLargeRegularWindows);
+  const reserves = windows.filter(isLunaReserve).sort(compareUsageWindows);
+  return [...regular, ...reserves];
+}
+
 export function featuredWindow(state: UsageViewState) {
   const declared = state.windows.find(
     (window) => window.id === state.featuredWindowId,

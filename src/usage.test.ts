@@ -5,6 +5,7 @@ import {
   formatCompactWindowDuration,
   formatWindowDuration,
   preferredCompactWindow,
+  sortedLargeWindows,
   sortedWindows,
   staleAgeLabel,
   staleLabel,
@@ -83,6 +84,54 @@ describe("사용량 표시 규칙", () => {
     expect(preferredCompactWindow(state([weekly, fiveHours]))?.id).toBe(
       "five-hours",
     );
+  });
+
+  it("Large는 잔량과 무관하게 짧은 일반 창을 먼저 표시하고 Reserve를 뒤에 둔다", () => {
+    const windows = [
+      window({
+        id: "weekly",
+        remainingPercent: 1,
+        windowDurationMins: 10_080,
+      }),
+      window({
+        id: "five-hours-later",
+        remainingPercent: 100,
+        resetsAt: 200,
+        windowDurationMins: 300,
+      }),
+      window({
+        id: "five-hours-sooner",
+        remainingPercent: 100,
+        resetsAt: 100,
+        windowDurationMins: 300,
+      }),
+      window({
+        id: "one-hour",
+        remainingPercent: 80,
+        windowDurationMins: 60,
+      }),
+      window({
+        id: "unknown-duration",
+        remainingPercent: 0,
+        windowDurationMins: null,
+      }),
+      window({
+        id: "gpt-reserve:primary",
+        bucketId: "gpt-reserve",
+        kind: "lunaReserve",
+        remainingPercent: 0,
+        windowDurationMins: 45,
+      }),
+    ];
+
+    expect(sortedLargeWindows(windows).map(({ id }) => id)).toEqual([
+      "one-hour",
+      "five-hours-sooner",
+      "five-hours-later",
+      "weekly",
+      "unknown-duration",
+      "gpt-reserve:primary",
+    ]);
   });
 
   it("여러 300분 창은 기존 정렬 규칙을 사용하고 소멸 시 기존 대표 창으로 대체한다", () => {

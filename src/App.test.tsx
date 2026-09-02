@@ -692,6 +692,34 @@ describe("Codex 사용량 오버레이", () => {
     );
   });
 
+  it("large는 5시간 창이 100%여도 주간 창보다 먼저 표시한다", async () => {
+    mockStartup(
+      "large",
+      {
+        ...weeklyOnly,
+        windows: [
+          { ...weeklyOnly.windows[0], remainingPercent: 5 },
+          { ...fiveHourWindow, usedPercent: 0, remainingPercent: 100 },
+        ],
+      },
+      {
+        windows: [
+          weeklyPace.windows[0],
+          shortPace("collecting", "unavailable").windows[0],
+        ],
+        updatedAt: weeklyPace.updatedAt,
+      },
+    );
+    const { container } = render(<App />);
+
+    await screen.findByText("페이스 관측 중");
+    expect(
+      Array.from(container.querySelectorAll(".pace-rows > article")).map(
+        (row) => row.querySelector(".window-label")?.textContent,
+      ),
+    ).toEqual(["5시간", "주간"]);
+  });
+
   it("large는 비활성 Luna Reserve를 페이스 없는 보조 행으로 표시한다", async () => {
     const reserve = {
       id: "gpt-reserve:primary",
